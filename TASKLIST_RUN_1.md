@@ -10,12 +10,12 @@
 
 ## Phase 1: Project Scaffolding & Build Infrastructure
 
-- [x] **1.1** Create `package.json` with dependencies: react, react-dom, typescript, vite, @vitejs/plugin-react, idb, @aws-sdk/client-s3
-- [x] **1.2** Create `tsconfig.json`, `vite.config.ts`
-- [x] **1.3** Create `scripts/download-wasm.mjs` — Node.js script to download latest OpenSCAD WASM release from GitHub to `public/wasm/`
-- [x] **1.4** Create `scripts/build.mjs` — Node.js build orchestrator (runs download-wasm if needed, then vite build)
-- [x] **1.5** Create `flake.nix` — Nix flake with devShell (node, npm) and default package (static site build)
-- [x] **1.6** Create minimal React app: `index.html`, `src/main.tsx`, `src/App.tsx` — just renders a placeholder page
+- [ ] **1.1** Create `package.json` with dependencies: react, react-dom, typescript, vite, @vitejs/plugin-react, idb, @aws-sdk/client-s3
+- [ ] **1.2** Create `tsconfig.json`, `vite.config.ts`
+- [ ] **1.3** Create `scripts/download-wasm.mjs` — Node.js script to download latest OpenSCAD WASM release from GitHub to `public/wasm/`
+- [ ] **1.4** Create `scripts/build.mjs` — Node.js build orchestrator (runs download-wasm if needed, then vite build)
+- [ ] **1.5** Create `flake.nix` — Nix flake with devShell (node, npm) and default package (static site build)
+- [ ] **1.6** Create minimal React app: `index.html`, `src/main.tsx`, `src/App.tsx` — just renders a placeholder page
 
 ## Phase 2: .scad File Parser
 
@@ -74,10 +74,8 @@
 _This section is for recording things learned during implementation that future runs should know about._
 
 ### OpenSCAD WASM
-- Source: https://github.com/openscad/openscad-wasm (official org repo, originally by DSchroer)
-- GitHub releases: latest tag is `2022.03.20` with separate .wasm/.js files
-- npm package: `openscad-wasm` v0.0.4 (July 2025, newer, has Manifold backend)
-- download-wasm.mjs uses GitHub releases API to fetch assets into public/wasm/
+- Source: https://github.com/nicknicknicknick/openscad-wasm (community WASM port) or check https://github.com/nicknicknicknick/openscad-wasm/releases and openscad official repos
+- The agent should verify the actual WASM download URL during task 1.3. The URL may have changed. Search GitHub for "openscad wasm" to find the correct release.
 - OpenSCAD CLI args relevant to this project:
   - `openscad -o output.stl input.scad` (STL export)
   - `openscad -o output.3mf input.scad` (3MF export)
@@ -93,5 +91,4 @@ _This section is for recording things learned during implementation that future 
 - Scad file conventions defined in SCAD_FORMAT.md
 
 ### Gotchas
-- Nix flake `npmDepsHash` needs to be filled after first successful npm install in Nix sandbox
-- `vite build` and `tsc --noEmit` both pass cleanly after Phase 1
+- (to be filled as discovered)

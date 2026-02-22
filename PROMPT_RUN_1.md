@@ -21,9 +21,9 @@ You are building a single-page web application that lets users load OpenSCAD `.s
 - Keep each task small — touch at most 2-3 files, ~100 lines per task.
 
 ## Current Phase
-**Phase 2: .scad File Parser**
+**Phase 1: Project Scaffolding & Build Infrastructure**
 
-Phase 1 (scaffolding) is complete. Focus on creating TypeScript types and the scad file parser that extracts parameters, parameter sets, and viewpoints from the structured comment sections.
+Focus on getting the project skeleton in place: package.json, Vite config, Nix flake, WASM download script, build script, and a minimal React app that renders "Hello World".
 
 ## What Success Looks Like
 When all phases are complete:
