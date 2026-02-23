@@ -24,10 +24,10 @@
           version = "0.1.0";
           src = ./.;
 
-          npmDepsHash = "";  # Must be filled after first npm install
+          npmDepsHash = "sha256-bdV2QOLNFT2cX5XbULzes3pGjUeylSdWCPz4OdNV710=";
 
           buildPhase = ''
-            node scripts/build.mjs
+            node scripts/build.mjs --skip-wasm
           '';
 
           installPhase = ''

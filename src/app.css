@@ -1,0 +1,481 @@
+/* ─── Base ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #1a1a1a;
+  background: #f5f5f5;
+  line-height: 1.5;
+}
+
+h1, h2, h3, h4 {
+  margin-top: 0;
+}
+
+button {
+  cursor: pointer;
+  padding: 0.4rem 0.8rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 0.875rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+button:hover:not(:disabled) {
+  background: #e8e8e8;
+  border-color: #999;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+input, select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: #4a90d9;
+  box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
+}
+
+/* ─── App Layout ───────────────────────────────────── */
+.app-container {
+  padding: 2rem;
+}
+
+.app-container--files {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.editor-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.editor-title {
+  margin: 0;
+}
+
+.editor-layout {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  gap: 2rem;
+}
+
+.file-load-error {
+  color: #dc3545;
+  margin-top: 1rem;
+}
+
+/* ─── WASM Status ──────────────────────────────────── */
+.wasm-status {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.wasm-status--idle {
+  background: #e0e0e0;
+  color: #666;
+}
+
+.wasm-status--loading {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.wasm-status--ready {
+  background: #d4edda;
+  color: #155724;
+}
+
+.wasm-status--rendering {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.wasm-status--error {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+/* ─── File Manager ─────────────────────────────────── */
+.file-manager {
+  margin-top: 1rem;
+}
+
+.file-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.file-manager-controls {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.file-manager-error {
+  color: #dc3545;
+  margin-bottom: 0.5rem;
+}
+
+.file-manager-loading,
+.file-manager-empty {
+  color: #666;
+  padding: 1rem;
+  text-align: center;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.file-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.file-list-item:first-child {
+  border-radius: 6px 6px 0 0;
+}
+
+.file-list-item:last-child {
+  border-bottom: 1px solid #ddd;
+  border-radius: 0 0 6px 6px;
+}
+
+.file-list-item:only-child {
+  border-radius: 6px;
+}
+
+.file-list-item:hover {
+  background: #f0f4ff;
+}
+
+.file-list-item.selected {
+  background: #e3ecf9;
+  border-color: #4a90d9;
+}
+
+.file-name {
+  font-weight: 500;
+  flex: 1;
+}
+
+.file-meta {
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.file-delete-btn {
+  padding: 0.15rem 0.5rem;
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.file-delete-btn:hover:not(:disabled) {
+  color: #dc3545;
+  background: transparent;
+}
+
+/* ─── Parameter Editor ─────────────────────────────── */
+.param-editor {
+  margin-bottom: 1.5rem;
+}
+
+.param-editor-empty {
+  color: #666;
+  font-style: italic;
+}
+
+.param-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.param-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.param-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+.param-help {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 0.1rem;
+}
+
+.param-input input[type="number"],
+.param-input input[type="text"],
+.param-input select {
+  width: 100%;
+}
+
+.param-input input[type="checkbox"] {
+  width: auto;
+}
+
+.vector-input {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.vector-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── Parameter Set Selector ───────────────────────── */
+.param-set-selector {
+  margin-bottom: 1.5rem;
+}
+
+.param-set-group h4 {
+  font-size: 0.85rem;
+  color: #555;
+  margin-bottom: 0.35rem;
+}
+
+.param-set-list {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.param-set-item {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.param-set-apply-btn {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.6rem;
+  background: #eef2ff;
+  border-color: #b3c6ff;
+  color: #3355aa;
+}
+
+.param-set-apply-btn:hover:not(:disabled) {
+  background: #dbe4ff;
+}
+
+.param-set-delete-btn {
+  padding: 0.15rem 0.4rem;
+  border: none;
+  background: transparent;
+  color: #999;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.param-set-delete-btn:hover:not(:disabled) {
+  color: #dc3545;
+  background: transparent;
+}
+
+.param-set-empty {
+  color: #666;
+  font-size: 0.85rem;
+  font-style: italic;
+  margin-bottom: 0.75rem;
+}
+
+.param-set-save {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.param-set-save input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── Export Controls ──────────────────────────────── */
+.export-controls {
+  margin-bottom: 1.5rem;
+}
+
+.export-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.export-error {
+  color: #dc3545;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+/* ─── Preview Panel ────────────────────────────────── */
+.preview-panel {
+  position: sticky;
+  top: 1rem;
+}
+
+.preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.preview-header h3 {
+  margin: 0;
+}
+
+.preview-error {
+  color: #dc3545;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.preview-placeholder {
+  color: #666;
+  text-align: center;
+  padding: 2rem;
+  background: #fff;
+  border: 2px dashed #ddd;
+  border-radius: 6px;
+  grid-column: 1 / -1;
+}
+
+.preview-item {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.preview-label {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: #f8f9fa;
+  border-bottom: 1px solid #eee;
+}
+
+.preview-loading {
+  padding: 2rem;
+  text-align: center;
+  color: #666;
+}
+
+.preview-item-error {
+  padding: 1rem;
+  color: #dc3545;
+  font-size: 0.85rem;
+}
+
+.preview-image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.preview-empty {
+  color: #666;
+  font-style: italic;
+}
+
+/* ─── OpenSCAD Logs ────────────────────────────────── */
+.openscad-logs {
+  margin-top: 0.5rem;
+  padding: 0.6rem;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ─── S3 Configuration ─────────────────────────────── */
+.s3-config {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.s3-config h3 {
+  margin-bottom: 0.75rem;
+}
+
+.s3-config-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.s3-config-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.s3-config-fields input {
+  width: 100%;
+}

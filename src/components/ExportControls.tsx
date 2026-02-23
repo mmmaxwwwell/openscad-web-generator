@@ -13,12 +13,14 @@ interface ExportControlsProps {
 export function ExportControls({ source, params, openscad, fileName }: ExportControlsProps) {
   const [exporting, setExporting] = useState<OutputFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorLogs, setErrorLogs] = useState<string[]>([]);
 
   const handleExport = useCallback(async (format: OutputFormat) => {
     if (!source) return;
 
     setExporting(format);
     setError(null);
+    setErrorLogs([]);
     try {
       const data = await openscad.render(source, params, format);
       const ext = format === '3mf' ? '3mf' : 'stl';
@@ -34,8 +36,9 @@ export function ExportControls({ source, params, openscad, fileName }: ExportCon
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    } catch (err) {
+    } catch (err: any) {
       setError(err instanceof Error ? err.message : 'Export failed');
+      if (err.logs) setErrorLogs(err.logs);
     } finally {
       setExporting(null);
     }
@@ -60,7 +63,14 @@ export function ExportControls({ source, params, openscad, fileName }: ExportCon
           {exporting === '3mf' ? 'Exporting 3MF…' : 'Export 3MF'}
         </button>
       </div>
-      {error && <div className="export-error">{error}</div>}
+      {error && (
+        <div className="export-error">
+          <div>{error}</div>
+          {errorLogs.length > 0 && (
+            <pre className="openscad-logs">{errorLogs.join('\n')}</pre>
+          )}
+        </div>
+      )}
     </div>
   );
 }

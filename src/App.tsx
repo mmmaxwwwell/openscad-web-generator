@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ScadParamSet, ScadValue } from './types';
-import type { StorageConfig } from './lib/storage';
+import type { S3Config, StorageConfig } from './lib/storage';
 import { useStorage } from './hooks/useStorage';
 import { useScadParser } from './hooks/useScadParser';
 import { useOpenSCAD } from './hooks/useOpenSCAD';
@@ -16,9 +16,18 @@ const paramSetStorage = new BrowserParamSetStorage();
 function App() {
   // ─── Storage configuration ──────────────────────────────
   const [storageBackend, setStorageBackend] = useState<'browser' | 's3'>('browser');
+  const [s3Config, setS3Config] = useState<S3Config>({
+    endpoint: '',
+    bucket: '',
+    region: 'us-east-1',
+    accessKeyId: '',
+    secretAccessKey: '',
+  });
   const storageConfig = useMemo<StorageConfig>(
-    () => ({ backend: storageBackend } as StorageConfig),
-    [storageBackend],
+    () => storageBackend === 's3'
+      ? { backend: 's3', s3: s3Config }
+      : { backend: 'browser' },
+    [storageBackend, s3Config],
   );
   const storage = useStorage(storageConfig);
 
@@ -120,7 +129,7 @@ function App() {
   // File selection screen
   if (!selectedFileId || !fileSource) {
     return (
-      <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif', maxWidth: '800px', margin: '0 auto' }}>
+      <div className="app-container app-container--files">
         <h1>OpenSCAD Web Parameter Editor</h1>
         <FileManager
           files={storage.files}
@@ -134,8 +143,58 @@ function App() {
           storageBackend={storageBackend}
           onStorageBackendChange={setStorageBackend}
         />
+        {storageBackend === 's3' && (
+          <div className="s3-config">
+            <h3>S3 Configuration</h3>
+            <div className="s3-config-fields">
+              <label>
+                Endpoint
+                <input
+                  type="text"
+                  placeholder="https://s3.amazonaws.com"
+                  value={s3Config.endpoint}
+                  onChange={(e) => setS3Config((prev) => ({ ...prev, endpoint: e.target.value }))}
+                />
+              </label>
+              <label>
+                Bucket
+                <input
+                  type="text"
+                  placeholder="my-scad-files"
+                  value={s3Config.bucket}
+                  onChange={(e) => setS3Config((prev) => ({ ...prev, bucket: e.target.value }))}
+                />
+              </label>
+              <label>
+                Region
+                <input
+                  type="text"
+                  placeholder="us-east-1"
+                  value={s3Config.region}
+                  onChange={(e) => setS3Config((prev) => ({ ...prev, region: e.target.value }))}
+                />
+              </label>
+              <label>
+                Access Key ID
+                <input
+                  type="text"
+                  value={s3Config.accessKeyId}
+                  onChange={(e) => setS3Config((prev) => ({ ...prev, accessKeyId: e.target.value }))}
+                />
+              </label>
+              <label>
+                Secret Access Key
+                <input
+                  type="password"
+                  value={s3Config.secretAccessKey}
+                  onChange={(e) => setS3Config((prev) => ({ ...prev, secretAccessKey: e.target.value }))}
+                />
+              </label>
+            </div>
+          </div>
+        )}
         {fileLoadError && (
-          <div style={{ color: 'red', marginTop: '1rem' }}>{fileLoadError}</div>
+          <div className="file-load-error">{fileLoadError}</div>
         )}
       </div>
     );
@@ -143,16 +202,23 @@ function App() {
 
   // Editor screen (file loaded & parsed)
   return (
-    <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+    <div className="app-container">
+      <div className="editor-header">
         <button onClick={handleBackToFiles}>&larr; Back to Files</button>
-        <h1 style={{ margin: 0 }}>{selectedFileId}</h1>
+        <h1 className="editor-title">{selectedFileId}</h1>
+        <span className={`wasm-status wasm-status--${openscad.status}`}>
+          {openscad.status === 'idle' && 'WASM: Not loaded'}
+          {openscad.status === 'loading' && 'WASM: Loading…'}
+          {openscad.status === 'ready' && 'WASM: Ready'}
+          {openscad.status === 'rendering' && 'WASM: Rendering…'}
+          {openscad.status === 'error' && 'WASM: Error'}
+        </span>
       </div>
 
       {!parsedFile ? (
         <div>Parsing file...</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: '2rem' }}>
+        <div className="editor-layout">
           {/* Left sidebar: parameters + sets + export */}
           <div>
             <ParameterEditor

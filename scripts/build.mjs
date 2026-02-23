@@ -23,15 +23,20 @@ function run(cmd, opts = {}) {
 
 async function main() {
   const forceWasm = process.argv.includes('--force-wasm');
+  const skipWasm = process.argv.includes('--skip-wasm');
 
   // Step 1: Download WASM if needed
-  const wasmExists = existsSync(join(WASM_DIR, 'openscad.wasm'));
-  if (!wasmExists || forceWasm) {
-    console.log('=== Downloading OpenSCAD WASM ===');
-    const args = forceWasm ? ' --force' : '';
-    run(`node scripts/download-wasm.mjs${args}`);
+  if (skipWasm) {
+    console.log('=== Skipping WASM download (--skip-wasm) ===');
   } else {
-    console.log('=== OpenSCAD WASM already present, skipping download ===');
+    const wasmExists = existsSync(join(WASM_DIR, 'openscad.wasm'));
+    if (!wasmExists || forceWasm) {
+      console.log('=== Downloading OpenSCAD WASM ===');
+      const args = forceWasm ? ' --force' : '';
+      run(`node scripts/download-wasm.mjs${args}`);
+    } else {
+      console.log('=== OpenSCAD WASM already present, skipping download ===');
+    }
   }
 
   // Step 2: Vite build

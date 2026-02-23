@@ -21,6 +21,8 @@ export interface UseOpenSCADResult {
   status: OpenSCADStatus;
   /** Error message if status is 'error'. */
   error: string | null;
+  /** OpenSCAD log output (stdout + stderr) from the last operation. */
+  logs: string[];
   /** Initialize the WASM module (called automatically, but can be called eagerly). */
   init: () => Promise<void>;
   /** Render scad source with parameter overrides to STL or 3MF. */
@@ -42,6 +44,7 @@ export function useOpenSCAD(): UseOpenSCADResult {
   const apiRef = useRef<OpenSCADApi | null>(null);
   const [status, setStatus] = useState<OpenSCADStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [logs, setLogs] = useState<string[]>([]);
 
   // Create API on mount, dispose on unmount
   useEffect(() => {
@@ -81,6 +84,7 @@ export function useOpenSCAD(): UseOpenSCADResult {
 
     setStatus('rendering');
     setError(null);
+    setLogs([]);
     try {
       const injected = injectParameters(source, params);
       const result = await api.render(injected, format);
@@ -90,6 +94,7 @@ export function useOpenSCAD(): UseOpenSCADResult {
       setStatus('error');
       const msg = err?.message ?? 'Render failed';
       setError(msg);
+      if (err.logs) setLogs(err.logs);
       throw err;
     }
   }, [status, init]);
@@ -108,6 +113,7 @@ export function useOpenSCAD(): UseOpenSCADResult {
 
     setStatus('rendering');
     setError(null);
+    setLogs([]);
     try {
       const injected = injectParameters(source, params);
       const result = await api.preview(injected, viewpoint, imgSize);
@@ -117,9 +123,10 @@ export function useOpenSCAD(): UseOpenSCADResult {
       setStatus('error');
       const msg = err?.message ?? 'Preview failed';
       setError(msg);
+      if (err.logs) setLogs(err.logs);
       throw err;
     }
   }, [status, init]);
 
-  return { status, error, init, render, preview };
+  return { status, error, logs, init, render, preview };
 }

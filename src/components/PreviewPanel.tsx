@@ -89,7 +89,14 @@ export function PreviewPanel({ source, params, viewpoints, openscad }: PreviewPa
         </button>
       </div>
 
-      {openscad.error && <div className="preview-error">{openscad.error}</div>}
+      {openscad.error && (
+        <div className="preview-error">
+          <div>{openscad.error}</div>
+          {openscad.logs.length > 0 && (
+            <pre className="openscad-logs">{openscad.logs.join('\n')}</pre>
+          )}
+        </div>
+      )}
 
       <div className="preview-grid">
         {previews.length === 0 ? (

@@ -60,12 +60,12 @@
 
 ## Phase 7: Polish & Final Build
 
-- [x] **7.1** Add error display for OpenSCAD stderr output
-- [x] **7.2** Add loading indicators for WASM init, preview generation, export
-- [x] **7.3** Add S3 configuration UI (endpoint, bucket, access key, secret key)
-- [x] **7.4** Verify `nix build` produces working static site
-- [x] **7.5** Create a sample `.scad` file demonstrating all conventions (params, sets, viewpoints)
-- [x] **7.6** Basic CSS / layout styling for usability
+- [ ] **7.1** Add error display for OpenSCAD stderr output
+- [ ] **7.2** Add loading indicators for WASM init, preview generation, export
+- [ ] **7.3** Add S3 configuration UI (endpoint, bucket, access key, secret key)
+- [ ] **7.4** Verify `nix build` produces working static site
+- [ ] **7.5** Create a sample `.scad` file demonstrating all conventions (params, sets, viewpoints)
+- [ ] **7.6** Basic CSS / layout styling for usability
 
 ---
 
@@ -121,12 +121,3 @@ _This section is for recording things learned during implementation that future 
 - Custom parameter sets use `BrowserParamSetStorage` instantiated at module level (singleton)
 - `ParameterSetSelector.onApply` merges overrides into current param values (spread, not replace)
 - Storage config uses `useMemo` to prevent unnecessary re-initialization
-- `tsc --noEmit` still passes after Phase 7, all 36 tests still pass, vite build succeeds
-- Worker's dynamic imports of `/wasm/openscad.js` and `/wasm/openscad.fonts.js` must be externalized in Vite's rollupOptions (both main build and worker config)
-- `nix build` uses `--skip-wasm` flag since WASM can't be downloaded in the Nix sandbox; WASM files must be deployed separately
-- `npmDepsHash` for flake.nix: `sha256-bdV2QOLNFT2cX5XbULzes3pGjUeylSdWCPz4OdNV710=`
-- `useOpenSCAD` hook now exposes `logs: string[]` from the last operation (captured from worker error responses)
-- Error logs from OpenSCAD (including `[stderr]` prefixed lines) are displayed in both PreviewPanel and ExportControls
-- S3 config UI appears on file selection screen when S3 backend is selected; config fields: endpoint, bucket, region, accessKeyId, secretAccessKey
-- All inline styles in App.tsx replaced with CSS classes; styles in `src/app.css` imported from `main.tsx`
-- Sample .scad file at `public/sample-box.scad` demonstrates all conventions (params, param sets, viewpoints, geometry)
