@@ -213,6 +213,36 @@ input:focus, select:focus {
   background: transparent;
 }
 
+.example-files {
+  margin-top: 1.5rem;
+}
+
+.example-files h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: #888;
+}
+
+.example-load-btn {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  border: 1px solid #555;
+  background: #333;
+  color: #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.example-load-btn:hover:not(:disabled) {
+  background: #444;
+  color: #fff;
+}
+
+.example-load-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* ─── Parameter Editor ─────────────────────────────── */
 .param-editor {
   margin-bottom: 1.5rem;
@@ -427,6 +457,14 @@ input:focus, select:focus {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.preview-3d-container {
+  width: 100%;
+  height: 500px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  overflow: hidden;
 }
 
 .preview-empty {

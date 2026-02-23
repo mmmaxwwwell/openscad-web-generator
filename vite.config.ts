@@ -6,13 +6,13 @@ export default defineConfig({
   build: {
     target: 'es2020',
     rollupOptions: {
-      external: ['/wasm/openscad.js', '/wasm/openscad.fonts.js'],
+      external: ['/wasm/openscad.js', '/wasm/openscad.fonts.js', '/wasm/openscad.mcad.js', '/wasm/openscad.bosl2.js'],
     },
   },
   worker: {
     format: 'es',
     rollupOptions: {
-      external: ['/wasm/openscad.js', '/wasm/openscad.fonts.js'],
+      external: ['/wasm/openscad.js', '/wasm/openscad.fonts.js', '/wasm/openscad.mcad.js', '/wasm/openscad.bosl2.js'],
     },
   },
 });

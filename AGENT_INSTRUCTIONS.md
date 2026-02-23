@@ -2,14 +2,16 @@
 
 ## What This App Does
 
-A single-page application (SPA) that lets users load OpenSCAD `.scad` files, edit parameters via a form UI, preview 3D models from multiple camera viewpoints, and export STL/3MF — entirely in the browser using OpenSCAD compiled to WebAssembly.
+A single-page application (SPA) that lets users load OpenSCAD `.scad` files, edit parameters via a form UI, export STL/3MF, and preview the exported 3D models interactively using Three.js — entirely in the browser using OpenSCAD compiled to WebAssembly.
 
 ## Tech Stack
 
 - **Frontend**: React 19 + TypeScript (strict)
+- **3D Rendering**: Three.js (STL/3MF preview via STLLoader + ThreeMFLoader + OrbitControls)
 - **Build**: Vite (bundler), Node.js build scripts (no shell scripts)
 - **Reproducibility**: Nix flake producing a static site
 - **WASM**: Pre-built OpenSCAD WASM from [openscad/openscad-wasm](https://github.com/nicodemus26/openscad-wasm), downloaded at build time
+- **Libraries**: MCAD and BOSL2 libraries bundled into the WASM filesystem at build time
 - **Storage**: IndexedDB (browser) + S3-compatible object storage (optional)
 - **Testing**: Vitest
 
@@ -56,22 +58,32 @@ A single-page application (SPA) that lets users load OpenSCAD `.scad` files, edi
 openscad-web-generator/
   flake.nix                    # Nix flake (devShell + static site package)
   vite.config.ts               # Vite config (externals for WASM files)
-  package.json                 # ESM; deps: react, idb, @aws-sdk/client-s3
+  package.json                 # ESM; deps: react, idb, three, @aws-sdk/client-s3
   scripts/
     download-wasm.mjs          # Downloads OpenSCAD WASM from GitHub releases
-    build.mjs                  # Orchestrates WASM download + vite build
+    bundle-bosl2.mjs           # Bundles BOSL2 library into hex-encoded JS module
+    build.mjs                  # Orchestrates WASM download + BOSL2 bundle + vite build
   public/
-    wasm/                      # OpenSCAD WASM files (populated by build, gitignored)
+    wasm/                      # OpenSCAD WASM + library bundles (populated by build, gitignored)
+    examples/
+      big_chapstick.scad       # Bundled example file (uses BOSL2)
+      CSG.scad                 # Boolean operations: union, intersection, difference
+      logo.scad                # Modules, variables, $fn usage
+      linear_extrude.scad      # 2D to 3D extrusion with twist and scale
+      rotate_extrude.scad      # Rotational extrusion examples
+      hull_sailboat.scad       # Hull operation (toy sailboat)
+      sign.scad                # Parametric sign with customizer sections
+      candleStand.scad         # Complex parametric candle stand
   src/
     main.tsx                   # React entry point (renders <App />)
     App.tsx                    # Root component — all top-level state lives here
     app.css                    # All application styles (single file)
     components/
-      FileManager.tsx          # File list, upload, delete, storage backend selector
+      FileManager.tsx          # File list, upload, delete, storage backend selector, example loader
       ParameterEditor.tsx      # Type-aware parameter input form
       ParameterSetSelector.tsx # Apply/save/delete parameter sets
-      PreviewPanel.tsx         # Multi-viewpoint PNG preview generation
-      ExportControls.tsx       # STL/3MF export + file download
+      PreviewPanel.tsx         # Three.js 3D model viewer (renders STL/3MF with OrbitControls)
+      ExportControls.tsx       # STL/3MF export + file download + triggers preview
     hooks/
       useOpenSCAD.ts           # WASM worker lifecycle + render/preview methods
       useStorage.ts            # Storage adapter initialization + file operations
@@ -122,6 +134,16 @@ Each request has a unique `id` so `openscad-api.ts` can match responses to pendi
 
 **Gotcha — WASM dynamic import**: The worker loads WASM via `import(/* @vite-ignore */ '${base}/wasm/openscad.js')`. The `@vite-ignore` comment is required because these files live in `public/` and aren't statically resolvable. Both the main Vite config and the worker config must externalize `/wasm/` paths.
 
+**Library loading**: During WASM initialization, the worker loads three library modules (fonts, MCAD, BOSL2) and writes their files into the Emscripten virtual filesystem. This makes `include <BOSL2/std.scad>`, `include <MCAD/...>`, etc. work transparently. Libraries are hex-encoded into JS modules following the pattern established by `openscad.mcad.js` from the openscad-wasm project. The BOSL2 bundle is generated at build time by `scripts/bundle-bosl2.mjs` from the locally installed BOSL2 library.
+
+```
+Worker init sequence:
+  1. import openscad.js → OpenSCAD WASM engine
+  2. import openscad.fonts.js → addFonts(inst)
+  3. import openscad.mcad.js → addMCAD(inst) → writes to /libraries/MCAD/
+  4. import openscad.bosl2.js → addBOSL2(inst) → writes to /libraries/BOSL2/
+```
+
 ### Boundary 2: React Components ↔ Hooks
 
 **Files**: `components/*.tsx` ↔ `hooks/*.ts`
@@ -132,6 +154,7 @@ Each request has a unique `id` so `openscad-api.ts` can match responses to pendi
 - `selectedFileId`, `fileSource` — which file is loaded
 - `paramValues` — current parameter values (initialized from parsed defaults)
 - `customSets` — user-saved parameter sets
+- `previewData`, `previewFormat` — last exported model ArrayBuffer + format for 3D preview
 - `storageConfig` — browser vs S3 backend selection
 
 Components are controlled — they don't hold their own persistent state beyond local UI concerns (e.g., "is the upload button loading").
@@ -205,26 +228,29 @@ User clicks file → App.handleFileSelect
   → components render with parsed data
 ```
 
-### Preview Generation
+### Example Loading
 ```
-User clicks "Generate Previews" → PreviewPanel.generatePreviews
-  → for each viewpoint (sequential, not parallel):
-    → openscad.preview(source, params, viewpoint)
-    → useOpenSCAD.preview → injectParameters(source, params)
-    → openscad-api → postMessage to worker
-    → worker: write .scad to FS, callMain with --camera args, read PNG
-    → PNG ArrayBuffer transferred back → Blob → object URL → <img>
+User clicks "Load" on example → FileManager.handleLoadExample
+  → fetch('/examples/big_chapstick.scad') → content
+  → onFileUpload(fileName, content) → saves to storage
+  → File appears in file list, user can select it normally
 ```
 
-**Why sequential**: There is one WASM worker instance. Parallel requests would queue inside the worker anyway, and sequential execution lets the UI show progress per viewpoint.
+Bundled examples are defined in the `BUNDLED_EXAMPLES` array in `FileManager.tsx`. Example files live in `public/examples/` and are fetched at runtime, then saved into the user's storage backend so they persist like any uploaded file.
 
-### Export
+### Export + 3D Preview
 ```
 User clicks "Export STL/3MF" → ExportControls.handleExport
   → openscad.render(source, params, format)
   → worker: write .scad, callMain with -o output.{stl,3mf}, read output
   → ArrayBuffer → Blob → createObjectURL → programmatic <a> click → download
+  → onModelGenerated(data, format) → App state (previewData, previewFormat)
+  → PreviewPanel receives ArrayBuffer + format
+  → Three.js STLLoader or ThreeMFLoader parses buffer
+  → Model centered, camera auto-fitted, rendered with OrbitControls
 ```
+
+The preview panel starts with a "Generate 3MF or STL to preview" placeholder. After any successful export, the rendered model is displayed in an interactive 3D viewer with orbit/zoom/pan controls. Each new export replaces the previous preview.
 
 ---
 
@@ -235,12 +261,13 @@ User clicks "Export STL/3MF" → ExportControls.handleExport
 nix develop              # Enter dev shell (Node.js 22)
 npm install              # Install dependencies
 npm run build:wasm       # Download OpenSCAD WASM files to public/wasm/
+npm run build:bosl2      # Bundle BOSL2 library to public/wasm/openscad.bosl2.js
 npm run dev              # Start Vite dev server
 ```
 
 ### Production Build
 ```bash
-npm run build            # Runs download-wasm.mjs + vite build → dist/
+npm run build            # Runs download-wasm.mjs + bundle-bosl2.mjs + vite build → dist/
 # or via Nix:
 nix build                # Reproducible build → result/
 ```
@@ -249,11 +276,13 @@ nix build                # Reproducible build → result/
 
 **`scripts/download-wasm.mjs`**: Downloads OpenSCAD WASM release assets from GitHub. Idempotent (skips if files exist unless `--force`). Creates `wasm-version.json` manifest.
 
-**`scripts/build.mjs`**: Orchestrator. Runs WASM download (unless `--skip-wasm`), then `vite build`. The `--skip-wasm` flag is used in Nix sandbox builds where WASM files are deployed separately.
+**`scripts/bundle-bosl2.mjs`**: Bundles the BOSL2 library into a hex-encoded JS module (`public/wasm/openscad.bosl2.js`). Searches standard OpenSCAD library paths (`~/.local/share/OpenSCAD/libraries/BOSL2/`, `/usr/share/openscad/libraries/BOSL2/`, or `$OPENSCADPATH`). Follows the same pattern as `openscad.mcad.js` from the openscad-wasm project. Idempotent (skips if file exists unless `--force`).
+
+**`scripts/build.mjs`**: Orchestrator. Runs WASM download (unless `--skip-wasm`), then BOSL2 bundling, then `vite build`. The `--skip-wasm` flag is used in Nix sandbox builds where WASM files are deployed separately.
 
 ### Vite Config Notes
-- WASM files in `public/wasm/` are externalized in both the main build and worker build configs
-- This prevents Vite from trying to bundle the WASM JS glue files
+- WASM and library files in `public/wasm/` are externalized in both the main build and worker build configs: `openscad.js`, `openscad.fonts.js`, `openscad.mcad.js`, `openscad.bosl2.js`
+- This prevents Vite from trying to bundle the WASM JS glue and library files
 - Worker format is set to `'es'` for ESM module workers
 
 ### Nix Flake
@@ -300,6 +329,10 @@ WASM integration is not unit-tested (requires browser environment with WASM load
 
 10. **Nix `npmDepsHash`** — Must be recalculated after any `package-lock.json` change. First build in sandbox will fail and print the correct hash.
 
+11. **BOSL2 bundle size** — The generated `openscad.bosl2.js` is ~6MB (hex-encoded from ~3.2MB of `.scad` files). It is gitignored under `public/wasm/` and must be regenerated via `npm run build:bosl2` on each dev machine. BOSL2 must be installed locally for the bundling script to find it.
+
+12. **Library module pattern** — Library bundles (`openscad.mcad.js`, `openscad.bosl2.js`) follow the same hex-encoding pattern: helper functions (`writeFolder`, `fromHex`, `ensureDirectoryExists`, `exists`), a data object mapping filenames to hex content, and an exported `add*()` function that writes to the WASM filesystem. To add a new library, follow this pattern and add the import + mount call in `openscad-worker.ts`'s `getInstance()`.
+
 ---
 
 ## Conventions for New Code
@@ -311,3 +344,5 @@ WASM integration is not unit-tested (requires browser environment with WASM load
 - **Dynamic imports for optional dependencies** — Follow the pattern in `storage.ts` for any new optional features.
 - **TypeScript strict** — All code is typed. Shared types go in `src/types/index.ts`.
 - **Node.js scripts, not shell scripts** — Build tooling uses `.mjs` files, not bash.
+- **Adding OpenSCAD libraries** — Follow the BOSL2/MCAD pattern: create a build script that hex-encodes `.scad` files into a JS module with an `add*()` export, add the dynamic import and mount call in `openscad-worker.ts`, and externalize the path in `vite.config.ts`.
+- **Adding example files** — Place `.scad` files in `public/examples/`, add an entry to `BUNDLED_EXAMPLES` in `FileManager.tsx`.

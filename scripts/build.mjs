@@ -39,11 +39,21 @@ async function main() {
     }
   }
 
-  // Step 2: Vite build
+  // Step 2: Bundle BOSL2 library
+  const bosl2Exists = existsSync(join(WASM_DIR, 'openscad.bosl2.js'));
+  if (!bosl2Exists || forceWasm) {
+    console.log('\n=== Bundling BOSL2 Library ===');
+    const bosl2Args = forceWasm ? ' --force' : '';
+    run(`node scripts/bundle-bosl2.mjs${bosl2Args}`);
+  } else {
+    console.log('=== BOSL2 bundle already present, skipping ===');
+  }
+
+  // Step 3: Vite build
   console.log('\n=== Building with Vite ===');
   run('npx vite build');
 
-  // Step 3: Summary
+  // Step 4: Summary
   console.log('\n=== Build Complete ===');
   console.log('Output: dist/');
 }

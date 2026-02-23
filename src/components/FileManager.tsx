@@ -1,6 +1,22 @@
 import { useCallback, useRef, useState } from 'react';
 import type { FileInfo } from '../types';
 
+interface ExampleFile {
+  name: string;
+  path: string;
+}
+
+const BUNDLED_EXAMPLES: ExampleFile[] = [
+  { name: 'Big Chapstick (BOSL2)', path: '/examples/big_chapstick.scad' },
+  { name: 'CSG Operations', path: '/examples/CSG.scad' },
+  { name: 'OpenSCAD Logo', path: '/examples/logo.scad' },
+  { name: 'Linear Extrude', path: '/examples/linear_extrude.scad' },
+  { name: 'Rotate Extrude', path: '/examples/rotate_extrude.scad' },
+  { name: 'Hull Sailboat', path: '/examples/hull_sailboat.scad' },
+  { name: 'Parametric Sign', path: '/examples/sign.scad' },
+  { name: 'Candle Stand', path: '/examples/candleStand.scad' },
+];
+
 interface FileManagerProps {
   files: FileInfo[];
   loading: boolean;
@@ -44,6 +60,21 @@ export function FileManager({
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [onFileUpload]);
+
+  const [loadingExample, setLoadingExample] = useState<string | null>(null);
+
+  const handleLoadExample = useCallback(async (example: ExampleFile) => {
+    setLoadingExample(example.name);
+    try {
+      const res = await fetch(example.path);
+      if (!res.ok) throw new Error(`Failed to fetch ${example.path}`);
+      const content = await res.text();
+      const fileName = example.path.split('/').pop()!;
+      await onFileUpload(fileName, content);
+    } finally {
+      setLoadingExample(null);
     }
   }, [onFileUpload]);
 
@@ -114,6 +145,24 @@ export function FileManager({
           ))}
         </ul>
       )}
+
+      <div className="example-files">
+        <h3>Examples</h3>
+        <ul className="file-list">
+          {BUNDLED_EXAMPLES.map((example) => (
+            <li key={example.path} className="file-list-item">
+              <span className="file-name">{example.name}</span>
+              <button
+                className="example-load-btn"
+                onClick={() => handleLoadExample(example)}
+                disabled={loadingExample === example.name}
+              >
+                {loadingExample === example.name ? 'Loading…' : 'Load'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }

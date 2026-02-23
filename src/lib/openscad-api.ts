@@ -4,7 +4,7 @@
  * Provides promise-based wrappers around postMessage calls.
  */
 
-import type { ScadValue, ScadViewpoint } from '../types';
+import type { ScadValue } from '../types';
 import type { WorkerRequest, WorkerResponse } from './openscad-worker';
 
 export type OutputFormat = 'stl' | '3mf';
@@ -14,10 +14,7 @@ export interface OpenSCADApi {
   init(): Promise<void>;
 
   /** Render scad source to STL or 3MF, returns the file bytes. */
-  render(scadSource: string, format: OutputFormat): Promise<ArrayBuffer>;
-
-  /** Generate a PNG preview for a given viewpoint, returns PNG bytes. */
-  preview(scadSource: string, viewpoint: ScadViewpoint, imgSize?: [number, number]): Promise<ArrayBuffer>;
+  render(scadSource: string, format: OutputFormat, onLog?: (line: string) => void): Promise<ArrayBuffer>;
 
   /** Terminate the worker. */
   dispose(): void;
@@ -26,16 +23,6 @@ export interface OpenSCADApi {
 let requestId = 0;
 function nextId(): string {
   return String(++requestId);
-}
-
-/**
- * Build a camera argument string for OpenSCAD's --camera flag.
- *
- * File format:  rotX,rotY,rotZ,transX,transY,transZ,distance
- * CLI expects:  transX,transY,transZ,rotX,rotY,rotZ,distance
- */
-export function viewpointToCameraArg(vp: ScadViewpoint): string {
-  return `${vp.transX},${vp.transY},${vp.transZ},${vp.rotX},${vp.rotY},${vp.rotZ},${vp.distance}`;
 }
 
 /**
@@ -74,20 +61,39 @@ export function createOpenSCADApi(): OpenSCADApi {
     reject: (reason: any) => void;
   }>();
 
+  const logCallbacks = new Map<string, (line: string) => void>();
+
   worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
     const msg = e.data;
-    if (msg.type === 'log') return; // informational, no pending promise
+    if (msg.type === 'log') {
+      const cb = logCallbacks.get(msg.id);
+      if (cb) {
+        for (const line of msg.logs) cb(line);
+      }
+      return;
+    }
 
     const entry = pending.get(msg.id);
     if (!entry) return;
     pending.delete(msg.id);
+    logCallbacks.delete(msg.id);
 
     if (msg.type === 'init') {
-      if (msg.success) entry.resolve(undefined);
-      else entry.reject(new Error(msg.error ?? 'WASM init failed'));
+      if (msg.success) {
+        console.log('[OpenSCAD] WASM initialized successfully');
+        entry.resolve(undefined);
+      } else {
+        console.error('[OpenSCAD] WASM init failed:', msg.error);
+        entry.reject(new Error(msg.error ?? 'WASM init failed'));
+      }
     } else if (msg.type === 'success') {
+      console.log('[OpenSCAD] Render succeeded');
       entry.resolve(msg.output);
     } else if (msg.type === 'error') {
+      console.error('[OpenSCAD] Render error:', msg.error);
+      if (msg.logs.length > 0) {
+        console.error('[OpenSCAD] Logs:\n' + msg.logs.join('\n'));
+      }
       const err = new Error(msg.error);
       (err as any).logs = msg.logs;
       entry.reject(err);
@@ -95,6 +101,7 @@ export function createOpenSCADApi(): OpenSCADApi {
   };
 
   worker.onerror = (e) => {
+    console.error('[OpenSCAD] Worker error:', e.message);
     // Reject all pending requests
     const err = new Error(`Worker error: ${e.message}`);
     for (const entry of pending.values()) {
@@ -115,22 +122,14 @@ export function createOpenSCADApi(): OpenSCADApi {
       await send<void>({ type: 'init', id: nextId() });
     },
 
-    async render(scadSource: string, format: OutputFormat) {
+    async render(scadSource: string, format: OutputFormat, onLog?: (line: string) => void) {
+      const id = nextId();
+      if (onLog) logCallbacks.set(id, onLog);
       return send<ArrayBuffer>({
         type: 'render',
-        id: nextId(),
+        id,
         scadSource,
         outputFormat: format,
-      });
-    },
-
-    async preview(scadSource: string, viewpoint: ScadViewpoint, imgSize?: [number, number]) {
-      return send<ArrayBuffer>({
-        type: 'preview',
-        id: nextId(),
-        scadSource,
-        cameraArgs: viewpointToCameraArg(viewpoint),
-        imgSize,
       });
     },
 

@@ -1,129 +1,196 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { ScadValue, ScadViewpoint } from '../types';
-import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
-
-interface PreviewImage {
-  viewpoint: ScadViewpoint;
-  dataUrl: string | null;
-  loading: boolean;
-  error: string | null;
-}
+import { useEffect, useRef, useState } from 'react';
+import * as THREE from 'three';
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
+import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 interface PreviewPanelProps {
-  source: string;
-  params: Record<string, ScadValue>;
-  viewpoints: ScadViewpoint[];
-  openscad: UseOpenSCADResult;
+  /** Raw ArrayBuffer of STL or 3MF data, or null when nothing has been rendered yet. */
+  modelData: ArrayBuffer | null;
+  /** The format of the model data. */
+  modelFormat: '3mf' | 'stl' | null;
 }
 
-export function PreviewPanel({ source, params, viewpoints, openscad }: PreviewPanelProps) {
-  const [previews, setPreviews] = useState<PreviewImage[]>([]);
+export function PreviewPanel({ modelData, modelFormat }: PreviewPanelProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const modelGroupRef = useRef<THREE.Group | null>(null);
+  const animFrameRef = useRef<number>(0);
+  const [error, setError] = useState<string | null>(null);
 
-  const generatePreviews = useCallback(async () => {
-    if (!source || viewpoints.length === 0) {
-      setPreviews([]);
+  // Initialize Three.js scene once
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f0f0);
+    sceneRef.current = scene;
+
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 10000);
+    camera.position.set(100, 100, 100);
+    cameraRef.current = camera;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controlsRef.current = controls;
+
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0x666666);
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight.position.set(1, 1, 1).normalize();
+    scene.add(directionalLight);
+
+    const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    backLight.position.set(-1, -0.5, -1).normalize();
+    scene.add(backLight);
+
+    // Grid helper
+    const grid = new THREE.GridHelper(200, 20, 0xcccccc, 0xe0e0e0);
+    scene.add(grid);
+
+    // Animation loop
+    const animate = () => {
+      animFrameRef.current = requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    // Resize observer
+    const resizeObserver = new ResizeObserver(() => {
+      if (!container) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    });
+    resizeObserver.observe(container);
+
+    return () => {
+      cancelAnimationFrame(animFrameRef.current);
+      resizeObserver.disconnect();
+      controls.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, []);
+
+  // Load model when data changes
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!scene || !camera || !controls) return;
+
+    // Remove previous model
+    if (modelGroupRef.current) {
+      scene.remove(modelGroupRef.current);
+      modelGroupRef.current.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          child.geometry.dispose();
+          if (Array.isArray(child.material)) {
+            child.material.forEach((m) => m.dispose());
+          } else {
+            child.material.dispose();
+          }
+        }
+      });
+      modelGroupRef.current = null;
+    }
+
+    if (!modelData || !modelFormat) {
+      setError(null);
       return;
     }
 
-    // Initialize all previews as loading
-    const initial: PreviewImage[] = viewpoints.map((vp) => ({
-      viewpoint: vp,
-      dataUrl: null,
-      loading: true,
-      error: null,
-    }));
-    setPreviews(initial);
+    try {
+      let group: THREE.Group;
 
-    // Generate each preview sequentially to avoid overloading the worker
-    for (let i = 0; i < viewpoints.length; i++) {
-      try {
-        const pngData = await openscad.preview(source, params, viewpoints[i]);
-        const blob = new Blob([pngData], { type: 'image/png' });
-        const dataUrl = URL.createObjectURL(blob);
-        setPreviews((prev) => {
-          const updated = [...prev];
-          updated[i] = { ...updated[i], dataUrl, loading: false };
-          return updated;
+      if (modelFormat === 'stl') {
+        const loader = new STLLoader();
+        const geometry = loader.parse(modelData);
+        const material = new THREE.MeshPhongMaterial({
+          color: 0x4a90d9,
+          specular: 0x222222,
+          shininess: 40,
         });
-      } catch (err) {
-        setPreviews((prev) => {
-          const updated = [...prev];
-          updated[i] = {
-            ...updated[i],
-            loading: false,
-            error: err instanceof Error ? err.message : 'Preview failed',
-          };
-          return updated;
+        const mesh = new THREE.Mesh(geometry, material);
+        group = new THREE.Group();
+        group.add(mesh);
+      } else {
+        const loader = new ThreeMFLoader();
+        group = loader.parse(modelData) as THREE.Group;
+        // Apply a default material if 3MF meshes lack one
+        group.traverse((child) => {
+          if (child instanceof THREE.Mesh && !child.material) {
+            child.material = new THREE.MeshPhongMaterial({
+              color: 0x4a90d9,
+              specular: 0x222222,
+              shininess: 40,
+            });
+          }
         });
       }
+
+      // Center the model and fit to view
+      const box = new THREE.Box3().setFromObject(group);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z);
+
+      group.position.sub(center);
+      modelGroupRef.current = group;
+      scene.add(group);
+
+      // Position camera to see the whole model
+      const fitDistance = maxDim / (2 * Math.tan((Math.PI * camera.fov) / 360));
+      camera.position.set(fitDistance * 1.2, fitDistance * 0.8, fitDistance * 1.2);
+      camera.near = maxDim * 0.001;
+      camera.far = maxDim * 100;
+      camera.updateProjectionMatrix();
+      controls.target.set(0, 0, 0);
+      controls.update();
+
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load model');
     }
-  }, [source, params, viewpoints, openscad]);
+  }, [modelData, modelFormat]);
 
-  // Clean up object URLs on unmount
-  useEffect(() => {
-    return () => {
-      previews.forEach((p) => {
-        if (p.dataUrl) URL.revokeObjectURL(p.dataUrl);
-      });
-    };
-  }, [previews]);
-
-  if (viewpoints.length === 0) {
-    return (
-      <div className="preview-panel">
-        <h3>Preview</h3>
-        <div className="preview-empty">No viewpoints defined in this file.</div>
-      </div>
-    );
-  }
+  const hasModel = !!modelData;
 
   return (
     <div className="preview-panel">
       <div className="preview-header">
         <h3>Preview</h3>
-        <button
-          onClick={generatePreviews}
-          disabled={openscad.status === 'rendering' || openscad.status === 'loading'}
-        >
-          {openscad.status === 'rendering' ? 'Rendering…' : 'Generate Previews'}
-        </button>
       </div>
-
-      {openscad.error && (
-        <div className="preview-error">
-          <div>{openscad.error}</div>
-          {openscad.logs.length > 0 && (
-            <pre className="openscad-logs">{openscad.logs.join('\n')}</pre>
-          )}
+      {error && <div className="preview-error">{error}</div>}
+      {!hasModel && (
+        <div className="preview-placeholder">
+          Generate 3MF or STL to preview
         </div>
       )}
-
-      <div className="preview-grid">
-        {previews.length === 0 ? (
-          <div className="preview-placeholder">
-            Click "Generate Previews" to render viewpoints.
-          </div>
-        ) : (
-          previews.map((preview, i) => (
-            <div key={i} className="preview-item">
-              <div className="preview-label">
-                {preview.viewpoint.label || `Viewpoint ${i + 1}`}
-              </div>
-              {preview.loading ? (
-                <div className="preview-loading">Rendering…</div>
-              ) : preview.error ? (
-                <div className="preview-item-error">{preview.error}</div>
-              ) : (
-                <img
-                  src={preview.dataUrl!}
-                  alt={preview.viewpoint.label || `Viewpoint ${i + 1}`}
-                  className="preview-image"
-                />
-              )}
-            </div>
-          ))
-        )}
-      </div>
+      <div
+        className="preview-3d-container"
+        ref={containerRef}
+        style={{ display: hasModel ? 'block' : 'none' }}
+      />
     </div>
   );
 }

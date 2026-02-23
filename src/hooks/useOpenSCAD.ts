@@ -1,7 +1,7 @@
 /**
  * React hook wrapping the OpenSCAD WASM API.
  *
- * Manages the worker lifecycle, provides render/preview methods,
+ * Manages the worker lifecycle, provides render methods,
  * and exposes loading/error state.
  */
 
@@ -12,7 +12,7 @@ import {
   type OpenSCADApi,
   type OutputFormat,
 } from '../lib/openscad-api';
-import type { ScadValue, ScadViewpoint } from '../types';
+import type { ScadValue } from '../types';
 
 export type OpenSCADStatus = 'idle' | 'loading' | 'ready' | 'rendering' | 'error';
 
@@ -31,102 +31,105 @@ export interface UseOpenSCADResult {
     params: Record<string, ScadValue>,
     format: OutputFormat,
   ) => Promise<ArrayBuffer>;
-  /** Generate a PNG preview for a viewpoint. */
-  preview: (
-    source: string,
-    params: Record<string, ScadValue>,
-    viewpoint: ScadViewpoint,
-    imgSize?: [number, number],
-  ) => Promise<ArrayBuffer>;
 }
 
 export function useOpenSCAD(): UseOpenSCADResult {
   const apiRef = useRef<OpenSCADApi | null>(null);
   const [status, setStatus] = useState<OpenSCADStatus>('idle');
+  const statusRef = useRef<OpenSCADStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
+  const mountedRef = useRef(true);
+
+  // Keep statusRef in sync so callbacks always see the latest value
+  const updateStatus = useCallback((s: OpenSCADStatus) => {
+    statusRef.current = s;
+    setStatus(s);
+  }, []);
+
+  const ensureApi = useCallback(() => {
+    if (!apiRef.current) {
+      apiRef.current = createOpenSCADApi();
+    }
+    return apiRef.current;
+  }, []);
 
   // Create API on mount, dispose on unmount
   useEffect(() => {
-    const api = createOpenSCADApi();
-    apiRef.current = api;
+    mountedRef.current = true;
+    ensureApi();
     return () => {
-      api.dispose();
+      mountedRef.current = false;
+      apiRef.current?.dispose();
       apiRef.current = null;
     };
+  }, [ensureApi]);
+
+  // Replace a crashed worker with a fresh one
+  const resetWorker = useCallback(() => {
+    console.log('[useOpenSCAD] Resetting worker after crash');
+    apiRef.current?.dispose();
+    apiRef.current = null;
   }, []);
 
   const init = useCallback(async () => {
-    const api = apiRef.current;
-    if (!api) return;
+    const api = ensureApi();
 
-    setStatus('loading');
+    updateStatus('loading');
     setError(null);
     try {
       await api.init();
-      setStatus('ready');
+      if (mountedRef.current) updateStatus('ready');
     } catch (err: any) {
-      setStatus('error');
-      setError(err?.message ?? 'Failed to initialize OpenSCAD');
+      console.error('[useOpenSCAD] Init failed:', err);
+      if (mountedRef.current) {
+        updateStatus('error');
+        setError(err?.message ?? 'Failed to initialize OpenSCAD');
+      }
     }
-  }, []);
+  }, [ensureApi, updateStatus]);
 
   const render = useCallback(async (
     source: string,
     params: Record<string, ScadValue>,
     format: OutputFormat,
   ): Promise<ArrayBuffer> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('OpenSCAD not initialized');
+    const currentStatus = statusRef.current;
 
-    // Auto-init if needed
-    if (status === 'idle') await init();
+    // Auto-init if needed (also retry after errors)
+    if (currentStatus === 'idle' || currentStatus === 'error') {
+      // After an error the WASM instance may be corrupted — start fresh
+      if (currentStatus === 'error') resetWorker();
+      await init();
+    }
 
-    setStatus('rendering');
+    // Read the API ref *after* potential resetWorker/init so we use the fresh worker
+    const api = ensureApi();
+
+    updateStatus('rendering');
     setError(null);
     setLogs([]);
     try {
       const injected = injectParameters(source, params);
-      const result = await api.render(injected, format);
-      setStatus('ready');
+      const result = await api.render(injected, format, (line) => {
+        if (mountedRef.current) setLogs((prev) => [...prev, line]);
+      });
+      if (mountedRef.current) updateStatus('ready');
       return result;
     } catch (err: any) {
-      setStatus('error');
-      const msg = err?.message ?? 'Render failed';
-      setError(msg);
-      if (err.logs) setLogs(err.logs);
+      console.error('[useOpenSCAD] Render failed:', err);
+      if (err.logs?.length) {
+        console.error('[useOpenSCAD] OpenSCAD logs:\n' + err.logs.join('\n'));
+      }
+      if (mountedRef.current) {
+        updateStatus('error');
+        const msg = err?.message ?? 'Render failed';
+        setError(msg);
+        if (err.logs) setLogs(err.logs);
+      }
       throw err;
     }
-  }, [status, init]);
+  }, [init, ensureApi, resetWorker, updateStatus]);
 
-  const preview = useCallback(async (
-    source: string,
-    params: Record<string, ScadValue>,
-    viewpoint: ScadViewpoint,
-    imgSize?: [number, number],
-  ): Promise<ArrayBuffer> => {
-    const api = apiRef.current;
-    if (!api) throw new Error('OpenSCAD not initialized');
-
-    // Auto-init if needed
-    if (status === 'idle') await init();
-
-    setStatus('rendering');
-    setError(null);
-    setLogs([]);
-    try {
-      const injected = injectParameters(source, params);
-      const result = await api.preview(injected, viewpoint, imgSize);
-      setStatus('ready');
-      return result;
-    } catch (err: any) {
-      setStatus('error');
-      const msg = err?.message ?? 'Preview failed';
-      setError(msg);
-      if (err.logs) setLogs(err.logs);
-      throw err;
-    }
-  }, [status, init]);
-
-  return { status, error, logs, init, render, preview };
+  return { status, error, logs, init, render };
 }

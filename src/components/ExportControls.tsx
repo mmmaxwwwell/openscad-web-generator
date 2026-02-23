@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ScadValue } from '../types';
 import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
 import type { OutputFormat } from '../lib/openscad-api';
@@ -8,12 +8,21 @@ interface ExportControlsProps {
   params: Record<string, ScadValue>;
   openscad: UseOpenSCADResult;
   fileName: string;
+  onModelGenerated?: (data: ArrayBuffer, format: OutputFormat) => void;
 }
 
-export function ExportControls({ source, params, openscad, fileName }: ExportControlsProps) {
+export function ExportControls({ source, params, openscad, fileName, onModelGenerated }: ExportControlsProps) {
   const [exporting, setExporting] = useState<OutputFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll log panel to bottom as new lines arrive
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [openscad.logs]);
 
   const handleExport = useCallback(async (format: OutputFormat) => {
     if (!source) return;
@@ -23,6 +32,7 @@ export function ExportControls({ source, params, openscad, fileName }: ExportCon
     setErrorLogs([]);
     try {
       const data = await openscad.render(source, params, format);
+      onModelGenerated?.(data, format);
       const ext = format === '3mf' ? '3mf' : 'stl';
       const mimeType = format === '3mf' ? 'model/3mf' : 'model/stl';
       const blob = new Blob([data], { type: mimeType });
@@ -63,6 +73,9 @@ export function ExportControls({ source, params, openscad, fileName }: ExportCon
           {exporting === '3mf' ? 'Exporting 3MF…' : 'Export 3MF'}
         </button>
       </div>
+      {openscad.logs.length > 0 && (
+        <pre className="openscad-logs" ref={logRef}>{openscad.logs.join('\n')}</pre>
+      )}
       {error && (
         <div className="export-error">
           <div>{error}</div>

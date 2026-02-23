@@ -4,13 +4,13 @@
  * Communication is via postMessage:
  *   Main thread sends: WorkerRequest
  *   Worker responds:   WorkerResponse
+ *
+ * Each render creates a fresh WASM instance because OpenSCAD's main()
+ * calls exit(), which leaves the Emscripten runtime in an unusable state.
+ * This matches how the official OpenSCAD playground handles it.
  */
 
-// The WASM files are served from /wasm/ in the public directory.
-// openscad.js uses import.meta.url and dynamic import() internally,
-// so we import it directly and let Vite handle the resolution.
-
-type OutputFormat = 'stl' | '3mf' | 'png';
+type OutputFormat = 'stl' | '3mf';
 
 interface RenderRequest {
   type: 'render';
@@ -20,20 +20,12 @@ interface RenderRequest {
   args?: string[];
 }
 
-interface PreviewRequest {
-  type: 'preview';
-  id: string;
-  scadSource: string;
-  cameraArgs: string; // "transX,transY,transZ,rotX,rotY,rotZ,distance"
-  imgSize?: [number, number];
-}
-
 interface InitRequest {
   type: 'init';
   id: string;
 }
 
-export type WorkerRequest = RenderRequest | PreviewRequest | InitRequest;
+export type WorkerRequest = RenderRequest | InitRequest;
 
 interface SuccessResponse {
   type: 'success';
@@ -63,67 +55,72 @@ interface LogResponse {
 
 export type WorkerResponse = SuccessResponse | ErrorResponse | InitResponse | LogResponse;
 
-// Emscripten module instance (lazy-initialized)
-let instance: any = null;
-let initPromise: Promise<any> | null = null;
+// Cache the loaded JS modules so we don't re-fetch them each time,
+// but create a fresh WASM instance for every render.
+let cachedModules: {
+  OpenSCAD: any;
+  addFonts: any;
+  addMCAD: any;
+  addBOSL2: any;
+} | null = null;
 
-async function getInstance(): Promise<any> {
-  if (instance) return instance;
-  if (initPromise) return initPromise;
+async function loadModules() {
+  if (cachedModules) return cachedModules;
 
-  initPromise = (async () => {
-    // Load the WASM entry points from the public directory using dynamic import.
-    // Construct full URLs to bypass Vite's import analysis (which blocks
-    // importing JS files from /public directly).
-    const base = self.location.origin;
-    // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
-    const openscadModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.js`);
-    // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
-    const fontsModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.fonts.js`);
-    const OpenSCAD = openscadModule.default;
-    const addFonts = fontsModule.addFonts;
+  const base = self.location.origin;
+  // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+  const openscadModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.js`);
+  // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+  const fontsModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.fonts.js`);
+  // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+  const mcadModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.mcad.js`);
+  // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+  const bosl2Module = await import(/* @vite-ignore */ `${base}/wasm/openscad.bosl2.js`);
 
-    const inst = await OpenSCAD({
-      noInitialRun: true,
-    });
-
-    addFonts(inst);
-    instance = inst;
-    return inst;
-  })();
-
-  return initPromise;
+  cachedModules = {
+    OpenSCAD: openscadModule.default,
+    addFonts: fontsModule.addFonts,
+    addMCAD: mcadModule.addMCAD,
+    addBOSL2: bosl2Module.addBOSL2,
+  };
+  return cachedModules;
 }
 
-function collectLogs(inst: any, fn: () => number): { exitCode: number; logs: string[] } {
-  const logs: string[] = [];
-  const origPrint = inst.print;
-  const origPrintErr = inst.printErr;
-  inst.print = (text: string) => logs.push(text);
-  inst.printErr = (text: string) => logs.push(`[stderr] ${text}`);
-  try {
-    const exitCode = fn();
-    return { exitCode, logs };
-  } finally {
-    inst.print = origPrint;
-    inst.printErr = origPrintErr;
-  }
+/** Create a fresh WASM instance with libraries loaded. */
+async function createInstance(
+  onStdout: (text: string) => void,
+  onStderr: (text: string) => void,
+): Promise<any> {
+  const { OpenSCAD, addFonts, addMCAD, addBOSL2 } = await loadModules();
+
+  const inst = await OpenSCAD({
+    noInitialRun: true,
+    print: onStdout,
+    printErr: onStderr,
+  });
+
+  addFonts(inst);
+  addMCAD(inst);
+  addBOSL2(inst);
+
+  return inst;
 }
 
-function cleanupFile(inst: any, path: string) {
-  try {
-    inst.FS.unlink(path);
-  } catch (_) {
-    // File may not exist — that's fine
-  }
-}
+// Catch unhandled errors/rejections in the worker so they aren't silent
+self.addEventListener('error', (e) => {
+  console.error('[OpenSCAD worker] Unhandled error:', e.message, e);
+});
+self.addEventListener('unhandledrejection', (e) => {
+  console.error('[OpenSCAD worker] Unhandled rejection:', e.reason);
+});
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const req = e.data;
 
   if (req.type === 'init') {
     try {
-      await getInstance();
+      // Pre-load JS modules so the first render is faster
+      await loadModules();
       self.postMessage({ type: 'init', id: req.id, success: true } satisfies InitResponse);
     } catch (err: any) {
       self.postMessage({
@@ -136,75 +133,129 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
     return;
   }
 
-  try {
-    const inst = await getInstance();
-    const inputPath = '/input.scad';
+  if (req.type === 'render') {
+    const collectedLogs: string[] = [];
 
-    if (req.type === 'render') {
+    const onStdout = (text: string) => {
+      console.log('[OpenSCAD stdout]', text);
+      collectedLogs.push(text);
+      self.postMessage({ type: 'log', id: req.id, logs: [text] } satisfies LogResponse);
+    };
+
+    const onStderr = (text: string) => {
+      console.warn('[OpenSCAD stderr]', text);
+      const line = `[stderr] ${text}`;
+      collectedLogs.push(line);
+      self.postMessage({ type: 'log', id: req.id, logs: [line] } satisfies LogResponse);
+    };
+
+    try {
+      // Create a fresh instance for each render — callMain + exit() leaves
+      // the Emscripten runtime unusable for subsequent calls.
+      const inst = await createInstance(onStdout, onStderr);
+
+      const inputPath = '/input.scad';
       const ext = req.outputFormat;
       const outputPath = `/output.${ext}`;
 
       inst.FS.writeFile(inputPath, req.scadSource);
-      cleanupFile(inst, outputPath);
 
-      const args = [inputPath, '-o', outputPath, ...(req.args ?? [])];
-      const { exitCode, logs } = collectLogs(inst, () => inst.callMain(args));
+      // Ensure /libraries exists (some WASM builds don't create it)
+      try { inst.FS.mkdir('/libraries'); } catch (_) { /* already exists */ }
+
+      // Log FS state for debugging
+      try {
+        const root = inst.FS.readdir('/');
+        console.log('[OpenSCAD worker] FS root:', root);
+        const libs = inst.FS.readdir('/libraries');
+        console.log('[OpenSCAD worker] /libraries:', libs);
+      } catch (fsErr: any) {
+        console.warn('[OpenSCAD worker] FS debug failed:', fsErr);
+      }
+
+      // Try minimal args first to diagnose crashes
+      const args = [inputPath, '-o', outputPath];
+      console.log('[OpenSCAD worker] Running with args:', args.join(' '));
+
+      let exitCode: number;
+      try {
+        const ret = inst.callMain(args);
+        exitCode = typeof ret === 'number' ? ret : 0;
+        console.log('[OpenSCAD worker] callMain returned:', ret);
+      } catch (e: any) {
+        console.error('[OpenSCAD worker] callMain threw:', e, 'name:', e?.name, 'status:', e?.status, 'message:', e?.message);
+        // Emscripten throws ExitStatus when OpenSCAD calls exit().
+        // Extract the exit code from the exception.
+        if (e?.name === 'ExitStatus') {
+          exitCode = e.status ?? 0;
+        } else if (e instanceof WebAssembly.RuntimeError) {
+          // WASM trap (abort, unreachable, OOM) — not a normal exit
+          self.postMessage({
+            type: 'error',
+            id: req.id,
+            error: `OpenSCAD WASM crashed: ${e.message}`,
+            logs: collectedLogs,
+          } satisfies ErrorResponse);
+          return;
+        } else if (typeof e === 'number') {
+          // Uncaught C++ exception — Emscripten throws the exception pointer
+          // as a raw number.  This typically means a bug or unsupported feature.
+          self.postMessage({
+            type: 'error',
+            id: req.id,
+            error: `OpenSCAD crashed with an internal error (C++ exception)`,
+            logs: collectedLogs,
+          } satisfies ErrorResponse);
+          return;
+        } else {
+          throw e;
+        }
+      }
 
       if (exitCode === 0) {
-        const output = inst.FS.readFile(outputPath) as Uint8Array;
-        const buf = output.buffer as ArrayBuffer;
+        let output: Uint8Array;
+        try {
+          output = inst.FS.readFile(outputPath) as Uint8Array;
+        } catch (readErr: any) {
+          console.error('[OpenSCAD worker] Failed to read output file:', readErr);
+          self.postMessage({
+            type: 'error',
+            id: req.id,
+            error: `Render succeeded but failed to read output: ${readErr?.message ?? readErr}`,
+            logs: collectedLogs,
+          } satisfies ErrorResponse);
+          return;
+        }
+
+        // Copy into a standalone ArrayBuffer — output.buffer is the entire
+        // WASM heap, which must not be transferred/detached.
+        const buf = new ArrayBuffer(output.byteLength);
+        new Uint8Array(buf).set(output);
+
         self.postMessage(
           { type: 'success', id: req.id, output: buf } satisfies SuccessResponse,
           { transfer: [buf] },
         );
       } else {
+        console.error(`[OpenSCAD worker] Exit code: ${exitCode}, logs:`, collectedLogs);
+        const errorMsg = exitCode > 255
+          ? `OpenSCAD crashed (code ${exitCode}). This may be caused by high memory usage — try reducing $fn or model complexity.`
+          : `OpenSCAD exited with code ${exitCode}`;
         self.postMessage({
           type: 'error',
           id: req.id,
-          error: `OpenSCAD exited with code ${exitCode}`,
-          logs,
+          error: errorMsg,
+          logs: collectedLogs,
         } satisfies ErrorResponse);
       }
-    } else if (req.type === 'preview') {
-      const outputPath = '/preview.png';
-      const [w, h] = req.imgSize ?? [512, 512];
-
-      inst.FS.writeFile(inputPath, req.scadSource);
-      cleanupFile(inst, outputPath);
-
-      const args = [
-        inputPath,
-        '-o', outputPath,
-        '--camera', req.cameraArgs,
-        '--imgsize', `${w},${h}`,
-        '--projection', 'p',
-        '--autocenter',
-      ];
-
-      const { exitCode, logs } = collectLogs(inst, () => inst.callMain(args));
-
-      if (exitCode === 0) {
-        const output = inst.FS.readFile(outputPath) as Uint8Array;
-        const buf = output.buffer as ArrayBuffer;
-        self.postMessage(
-          { type: 'success', id: req.id, output: buf } satisfies SuccessResponse,
-          { transfer: [buf] },
-        );
-      } else {
-        self.postMessage({
-          type: 'error',
-          id: req.id,
-          error: `OpenSCAD preview failed with code ${exitCode}`,
-          logs,
-        } satisfies ErrorResponse);
-      }
+    } catch (err: any) {
+      console.error('[OpenSCAD worker] Unexpected error:', err);
+      self.postMessage({
+        type: 'error',
+        id: req.id,
+        error: err?.message ?? String(err),
+        logs: collectedLogs,
+      } satisfies ErrorResponse);
     }
-  } catch (err: any) {
-    self.postMessage({
-      type: 'error',
-      id: req.id,
-      error: err?.message ?? String(err),
-      logs: [],
-    } satisfies ErrorResponse);
   }
 };

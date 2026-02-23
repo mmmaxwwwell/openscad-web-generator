@@ -10,6 +10,7 @@ import { ParameterEditor } from './components/ParameterEditor';
 import { ParameterSetSelector } from './components/ParameterSetSelector';
 import { PreviewPanel } from './components/PreviewPanel';
 import { ExportControls } from './components/ExportControls';
+import type { OutputFormat } from './lib/openscad-api';
 
 const paramSetStorage = new BrowserParamSetStorage();
 
@@ -125,6 +126,15 @@ function App() {
   // ─── OpenSCAD WASM ─────────────────────────────────────
   const openscad = useOpenSCAD();
 
+  // ─── 3D Preview state ─────────────────────────────────
+  const [previewData, setPreviewData] = useState<ArrayBuffer | null>(null);
+  const [previewFormat, setPreviewFormat] = useState<OutputFormat | null>(null);
+
+  const handleModelGenerated = useCallback((data: ArrayBuffer, format: OutputFormat) => {
+    setPreviewData(data);
+    setPreviewFormat(format);
+  }, []);
+
   // ─── Render ────────────────────────────────────────────
   // File selection screen
   if (!selectedFileId || !fileSource) {
@@ -238,16 +248,15 @@ function App() {
               params={paramValues}
               openscad={openscad}
               fileName={selectedFileId}
+              onModelGenerated={handleModelGenerated}
             />
           </div>
 
-          {/* Right area: preview */}
+          {/* Right area: 3D preview */}
           <div>
             <PreviewPanel
-              source={fileSource}
-              params={paramValues}
-              viewpoints={parsedFile.viewpoints}
-              openscad={openscad}
+              modelData={previewData}
+              modelFormat={previewFormat}
             />
           </div>
         </div>
