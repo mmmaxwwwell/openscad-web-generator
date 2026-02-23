@@ -19,19 +19,19 @@
 
 ## Phase 2: .scad File Parser
 
-- [ ] **2.1** Create `src/types/index.ts` — define ScadParam, ScadParamSet, ScadViewpoint, ScadFile types
-- [ ] **2.2** Create `src/lib/scad-parser.ts` — parse BEGIN_PARAMS/END_PARAMS section (parameters + help text)
-- [ ] **2.3** Extend parser for BEGIN_PARAM_SETS/END_PARAM_SETS (default parameter sets)
-- [ ] **2.4** Extend parser for BEGIN_VIEWPOINTS/END_VIEWPOINTS (viewpoints with labels)
-- [ ] **2.5** Write unit tests for the parser (create a test scad file fixture)
+- [x] **2.1** Create `src/types/index.ts` — define ScadParam, ScadParamSet, ScadViewpoint, ScadFile types
+- [x] **2.2** Create `src/lib/scad-parser.ts` — parse BEGIN_PARAMS/END_PARAMS section (parameters + help text)
+- [x] **2.3** Extend parser for BEGIN_PARAM_SETS/END_PARAM_SETS (default parameter sets)
+- [x] **2.4** Extend parser for BEGIN_VIEWPOINTS/END_VIEWPOINTS (viewpoints with labels)
+- [x] **2.5** Write unit tests for the parser (vitest, 27 tests all passing)
 
 ## Phase 3: Storage Layer
 
-- [ ] **3.1** Create `src/lib/storage.ts` — unified StorageAdapter interface
-- [ ] **3.2** Create `src/lib/storage-browser.ts` — IndexedDB adapter using `idb`
-- [ ] **3.3** Create `src/lib/storage-s3.ts` — S3-compatible adapter using AWS SDK v3
-- [ ] **3.4** Create `src/hooks/useStorage.ts` — React hook wrapping the storage adapters
-- [ ] **3.5** Add IndexedDB storage for custom parameter sets per file (separate object store)
+- [x] **3.1** Create `src/lib/storage.ts` — unified StorageAdapter interface + factory function with dynamic imports
+- [x] **3.2** Create `src/lib/storage-browser.ts` — IndexedDB adapter using `idb` (BrowserStorageAdapter)
+- [x] **3.3** Create `src/lib/storage-s3.ts` — S3-compatible adapter using AWS SDK v3 (S3StorageAdapter)
+- [x] **3.4** Create `src/hooks/useStorage.ts` — React hook wrapping the storage adapters
+- [x] **3.5** Add IndexedDB storage for custom parameter sets per file (BrowserParamSetStorage class in storage-browser.ts)
 
 ## Phase 4: OpenSCAD WASM Integration
 
@@ -95,3 +95,9 @@ _This section is for recording things learned during implementation that future 
 ### Gotchas
 - Nix flake `npmDepsHash` needs to be filled after first successful npm install in Nix sandbox
 - `vite build` and `tsc --noEmit` both pass cleanly after Phase 1
+- Vitest added as test framework (v4.0.18), configured in package.json with `npm test`
+- `tsc --noEmit` still passes after Phase 2
+- `tsc --noEmit` still passes after Phase 3, all 27 parser tests still pass
+- Storage uses dynamic imports in `createStorage()` so S3 adapter + AWS SDK are only loaded when needed
+- `BrowserParamSetStorage` class handles custom param sets per file in a separate IndexedDB object store (`parameter-sets`), keyed by `{fileId}:{setName}` with an index on `fileId`
+- `useStorage` hook re-initializes adapter when config changes (backend type or S3 config)

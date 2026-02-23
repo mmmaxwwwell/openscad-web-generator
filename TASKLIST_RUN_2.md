@@ -19,11 +19,11 @@
 
 ## Phase 2: .scad File Parser
 
-- [ ] **2.1** Create `src/types/index.ts` — define ScadParam, ScadParamSet, ScadViewpoint, ScadFile types
-- [ ] **2.2** Create `src/lib/scad-parser.ts` — parse BEGIN_PARAMS/END_PARAMS section (parameters + help text)
-- [ ] **2.3** Extend parser for BEGIN_PARAM_SETS/END_PARAM_SETS (default parameter sets)
-- [ ] **2.4** Extend parser for BEGIN_VIEWPOINTS/END_VIEWPOINTS (viewpoints with labels)
-- [ ] **2.5** Write unit tests for the parser (create a test scad file fixture)
+- [x] **2.1** Create `src/types/index.ts` — define ScadParam, ScadParamSet, ScadViewpoint, ScadFile types
+- [x] **2.2** Create `src/lib/scad-parser.ts` — parse BEGIN_PARAMS/END_PARAMS section (parameters + help text)
+- [x] **2.3** Extend parser for BEGIN_PARAM_SETS/END_PARAM_SETS (default parameter sets)
+- [x] **2.4** Extend parser for BEGIN_VIEWPOINTS/END_VIEWPOINTS (viewpoints with labels)
+- [x] **2.5** Write unit tests for the parser (vitest, 27 tests all passing)
 
 ## Phase 3: Storage Layer
 
@@ -95,3 +95,5 @@ _This section is for recording things learned during implementation that future 
 ### Gotchas
 - Nix flake `npmDepsHash` needs to be filled after first successful npm install in Nix sandbox
 - `vite build` and `tsc --noEmit` both pass cleanly after Phase 1
+- Vitest added as test framework (v4.0.18), configured in package.json with `npm test`
+- `tsc --noEmit` still passes after Phase 2

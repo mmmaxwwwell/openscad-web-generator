@@ -21,9 +21,9 @@ You are building a single-page web application that lets users load OpenSCAD `.s
 - Keep each task small — touch at most 2-3 files, ~100 lines per task.
 
 ## Current Phase
-**Phase 2: .scad File Parser**
+**Phase 4: OpenSCAD WASM Integration**
 
-Phase 1 (scaffolding) is complete. Focus on creating TypeScript types and the scad file parser that extracts parameters, parameter sets, and viewpoints from the structured comment sections.
+Phases 1 (scaffolding), 2 (scad file parser), and 3 (storage layer) are complete. Focus on creating the Web Worker for OpenSCAD WASM, the main-thread API, the React hook, and parameter injection.
 
 ## What Success Looks Like
 When all phases are complete:

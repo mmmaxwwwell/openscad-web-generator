@@ -21,9 +21,9 @@ You are building a single-page web application that lets users load OpenSCAD `.s
 - Keep each task small — touch at most 2-3 files, ~100 lines per task.
 
 ## Current Phase
-**Phase 2: .scad File Parser**
+**Phase 5: UI Components**
 
-Phase 1 (scaffolding) is complete. Focus on creating TypeScript types and the scad file parser that extracts parameters, parameter sets, and viewpoints from the structured comment sections.
+Phases 1 (scaffolding), 2 (scad file parser), 3 (storage layer), and 4 (OpenSCAD WASM integration) are complete. Task 4.5 (live WASM integration test) is deferred — it requires a running browser environment. Focus on building the UI components: FileManager, ParameterEditor, ParameterSetSelector, PreviewPanel, ExportControls, and the useScadParser hook.
 
 ## What Success Looks Like
 When all phases are complete:
