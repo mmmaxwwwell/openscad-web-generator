@@ -43,12 +43,12 @@
 
 ## Phase 5: UI Components
 
-- [ ] **5.1** Create `src/components/FileManager.tsx` — list files, switch storage backend, load/upload files
-- [ ] **5.2** Create `src/components/ParameterEditor.tsx` — render form inputs from parsed params with help text
-- [ ] **5.3** Create `src/components/ParameterSetSelector.tsx` — dropdown/list of default sets from file + custom saved sets, apply/save/delete
-- [ ] **5.4** Create `src/components/PreviewPanel.tsx` — display preview images from each viewpoint, loading states
-- [ ] **5.5** Create `src/components/ExportControls.tsx` — STL and 3MF export buttons with download
-- [ ] **5.6** Create `src/hooks/useScadParser.ts` — hook that parses a loaded scad file and returns structured data
+- [x] **5.1** Create `src/components/FileManager.tsx` — list files, switch storage backend, load/upload files
+- [x] **5.2** Create `src/components/ParameterEditor.tsx` — render form inputs from parsed params with help text
+- [x] **5.3** Create `src/components/ParameterSetSelector.tsx` — dropdown/list of default sets from file + custom saved sets, apply/save/delete
+- [x] **5.4** Create `src/components/PreviewPanel.tsx` — display preview images from each viewpoint, loading states
+- [x] **5.5** Create `src/components/ExportControls.tsx` — STL and 3MF export buttons with download
+- [x] **5.6** Create `src/hooks/useScadParser.ts` — hook that parses a loaded scad file and returns structured data
 
 ## Phase 6: App Integration & Routing
 
@@ -109,3 +109,9 @@ _This section is for recording things learned during implementation that future 
 - Parameter injection prepends overrides to scad source (OpenSCAD last-assignment-wins for variables)
 - `Uint8Array.buffer` returns `ArrayBufferLike` in TS — needs `as ArrayBuffer` cast for `postMessage` transfer
 - `self.postMessage(msg, { transfer: [buf] })` is the correct worker postMessage overload for transferables
+- `tsc --noEmit` still passes after Phase 5, all 36 tests still pass
+- `useScadParser` hook memoizes parse result via `useMemo` keyed on source string
+- `PreviewPanel` generates previews sequentially to avoid overloading the single WASM worker
+- `ExportControls` uses `URL.createObjectURL` + programmatic `<a>` click for file download
+- `ParameterEditor` supports all 5 param types: number, string, boolean, vector, enum (dropdown)
+- `FileManager` uses hidden `<input type="file">` for .scad upload, reads via `file.text()`
