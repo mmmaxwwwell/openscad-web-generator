@@ -72,9 +72,16 @@ async function getInstance(): Promise<any> {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    // Dynamic import of the WASM entry point from the public directory
-    const { default: OpenSCAD } = await import('/wasm/openscad.js' as any);
-    const { addFonts } = await import('/wasm/openscad.fonts.js' as any);
+    // Load the WASM entry points from the public directory using dynamic import.
+    // Construct full URLs to bypass Vite's import analysis (which blocks
+    // importing JS files from /public directly).
+    const base = self.location.origin;
+    // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+    const openscadModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.js`);
+    // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
+    const fontsModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.fonts.js`);
+    const OpenSCAD = openscadModule.default;
+    const addFonts = fontsModule.addFonts;
 
     const inst = await OpenSCAD({
       noInitialRun: true,
