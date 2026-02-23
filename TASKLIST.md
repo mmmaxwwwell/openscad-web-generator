@@ -52,11 +52,11 @@
 
 ## Phase 6: App Integration & Routing
 
-- [ ] **6.1** Wire up `App.tsx` — file selection screen vs. parameter editor/preview screen
-- [ ] **6.2** Connect FileManager -> ParameterEditor flow (load file, parse, display params)
-- [ ] **6.3** Connect ParameterEditor -> PreviewPanel (on param change, trigger preview)
-- [ ] **6.4** Connect ExportControls (pass current params + scad source to WASM export)
-- [ ] **6.5** Integrate ParameterSetSelector with ParameterEditor (apply sets, save custom sets)
+- [x] **6.1** Wire up `App.tsx` — file selection screen vs. parameter editor/preview screen
+- [x] **6.2** Connect FileManager -> ParameterEditor flow (load file, parse, display params)
+- [x] **6.3** Connect ParameterEditor -> PreviewPanel (on param change, trigger preview)
+- [x] **6.4** Connect ExportControls (pass current params + scad source to WASM export)
+- [x] **6.5** Integrate ParameterSetSelector with ParameterEditor (apply sets, save custom sets)
 
 ## Phase 7: Polish & Final Build
 
@@ -115,3 +115,9 @@ _This section is for recording things learned during implementation that future 
 - `ExportControls` uses `URL.createObjectURL` + programmatic `<a>` click for file download
 - `ParameterEditor` supports all 5 param types: number, string, boolean, vector, enum (dropdown)
 - `FileManager` uses hidden `<input type="file">` for .scad upload, reads via `file.text()`
+- `tsc --noEmit` still passes after Phase 6, all 36 tests still pass
+- App.tsx has two screens: file selection (FileManager) and editor (ParameterEditor + ParameterSetSelector + ExportControls + PreviewPanel)
+- Parameter values state lives in App.tsx, initialized from parsed defaults, reset on file change
+- Custom parameter sets use `BrowserParamSetStorage` instantiated at module level (singleton)
+- `ParameterSetSelector.onApply` merges overrides into current param values (spread, not replace)
+- Storage config uses `useMemo` to prevent unnecessary re-initialization

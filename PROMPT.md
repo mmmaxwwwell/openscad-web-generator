@@ -21,9 +21,9 @@ You are building a single-page web application that lets users load OpenSCAD `.s
 - Keep each task small — touch at most 2-3 files, ~100 lines per task.
 
 ## Current Phase
-**Phase 5: UI Components**
+**Phase 7: Polish & Final Build**
 
-Phases 1 (scaffolding), 2 (scad file parser), 3 (storage layer), and 4 (OpenSCAD WASM integration) are complete. Task 4.5 (live WASM integration test) is deferred — it requires a running browser environment. Focus on building the UI components: FileManager, ParameterEditor, ParameterSetSelector, PreviewPanel, ExportControls, and the useScadParser hook.
+Phases 1 (scaffolding), 2 (scad file parser), 3 (storage layer), 4 (OpenSCAD WASM integration), 5 (UI components), and 6 (app integration & routing) are complete. Task 4.5 (live WASM integration test) is deferred — it requires a running browser environment. Focus on polish: error display for OpenSCAD stderr, loading indicators, S3 configuration UI, Nix build verification, sample .scad file, and CSS/layout styling.
 
 ## What Success Looks Like
 When all phases are complete:
