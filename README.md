@@ -9,14 +9,29 @@ A browser-based parameter editor and renderer for [OpenSCAD](https://openscad.or
 - **Parameter editing** — automatically parses customizer parameters from `.scad` files and renders sliders, dropdowns, checkboxes, and text inputs
 - **Parameter sets** — save and restore named parameter presets per file
 - **3D preview** — live Three.js preview of rendered models
-- **Export to STL** — single-color STL export
-- **Multi-color 3MF export** — renders each color as a separate OpenSCAD pass and merges into a single 3MF with color groups
+- **Export to STL / 3MF / Multi-Color 3MF** — each format is independently cached with its own render and download buttons
+- **Render cache** — rendered models are cached in IndexedDB so you can download any previously rendered format without re-rendering
+- **Shareable URLs** — the current file and parameter values are synced to the URL, so you can share direct links like `?example=sign.scad&height=30`
+- **File descriptions** — `.scad` files can include a `BEGIN_DESCRIPTION` block that is displayed on the editor page
 - **Storage backends** — files stored in browser (IndexedDB) or on S3-compatible storage
 - **Fully client-side** — OpenSCAD runs as WASM in a web worker, no server required
 
 ## Writing `.scad` Files for This Tool
 
 The app reads special comment blocks in your `.scad` file to extract parameters and parameter sets. These blocks can appear anywhere in the file but are typically placed at the top.
+
+### Description
+
+Add a description block to your file to display a summary on the editor page:
+
+```scad
+// BEGIN_DESCRIPTION
+// A protective case for the Fi Mini GPS tracker.
+// Held together by 6 M3x6 socket head cap screws.
+// END_DESCRIPTION
+```
+
+Lines are stripped of leading `//` and displayed as a styled callout below the file title.
 
 ### Parameters
 
@@ -85,6 +100,17 @@ Define named presets between `// BEGIN_PARAM_SETS` and `// END_PARAM_SETS`. Each
 ```
 
 These appear as buttons in the sidebar. Users can also save their own custom presets from the UI.
+
+### Shareable URLs
+
+The app syncs state to URL search parameters so you can share direct links:
+
+- `?example=sign.scad` — load a bundled example
+- `?example=sign.scad&text=Hello&height=30` — load with parameter overrides
+- `?file=myfile.scad` — load a file from the user's browser storage
+- [`?example=fi_mini_case.scad&qr_code_url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`](https://mmmaxwwwell.github.io/openscad-web-generator/?example=fi_mini_case.scad&qr_code_url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ) — Fi Mini case with a QR code
+
+Only parameters that differ from their defaults are included in the URL. Parameter values are type-checked against the file's parameter definitions (numbers, booleans, vectors, enums).
 
 ### Colors and Multi-Color 3MF Export
 
