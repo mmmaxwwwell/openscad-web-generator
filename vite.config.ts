@@ -1,9 +1,16 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const isApk = process.env.VITE_APK === '1';
+
 export default defineConfig({
-  base: '/openscad-web-generator/',
+  base: isApk ? './' : '/openscad-web-generator/',
   plugins: [react()],
+  server: {
+    watch: {
+      ignored: ['**/vendor/grid-apps/**'],
+    },
+  },
   build: {
     target: 'es2020',
     rollupOptions: {

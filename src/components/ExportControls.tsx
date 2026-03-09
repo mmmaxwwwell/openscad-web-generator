@@ -3,8 +3,10 @@ import type { ScadValue } from '../types';
 import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
 import type { OutputFormat } from '../lib/openscad-api';
 import type { Printer } from '../hooks/usePrinters';
+import type { ColorGroup } from '../lib/merge-3mf';
+import { extractColorGroups } from '../lib/merge-3mf';
 import { computeCacheKey, getCachedRender, setCachedRender, hasCachedRender } from '../lib/render-cache';
-import { SendToPrinter } from './SendToPrinter';
+import { SendToPrinterButton } from './SendToPrinterButton';
 
 interface ExportControlsProps {
   source: string;
@@ -15,6 +17,7 @@ interface ExportControlsProps {
   onModelGenerated?: (data: ArrayBuffer, format: OutputFormat) => void;
   onRenderComplete?: () => void;
   onToast?: (message: string) => void;
+  onSendToPrinter?: (printer: Printer, stlData: ArrayBuffer, fileName: string, colorGroups?: ColorGroup[], threeMfData?: ArrayBuffer) => void;
 }
 
 type ExportType = OutputFormat | 'multicolor-3mf';
@@ -37,7 +40,7 @@ function formatSuffix(format: ExportType): string {
   return format === 'multicolor-3mf' ? '-multicolor' : '';
 }
 
-export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast }: ExportControlsProps) {
+export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast, onSendToPrinter }: ExportControlsProps) {
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
@@ -132,78 +135,97 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
 
   const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
 
-  const getExportBlob = useCallback(async (format: ExportType): Promise<Blob | null> => {
-    if (!source) return null;
-    const cacheKey = await computeCacheKey(source, params, format);
-    const data = await getCachedRender(cacheKey);
-    if (!data) return null;
-    const ext = formatExt(format);
-    const mimeType = ext === '3mf' ? 'model/3mf' : 'model/stl';
-    return new Blob([data], { type: mimeType });
-  }, [source, params]);
+  // Send to printer for a specific format — fetches cached data and opens the print dialog
+  const handleSendForFormat = useCallback(async (format: ExportType, printer: Printer) => {
+    if (!onSendToPrinter || !source) return;
 
-  const getExportFileName = useCallback((format: ExportType): string => {
-    const ext = formatExt(format);
-    const suffix = formatSuffix(format);
-    const baseName = fileName.replace(/\.scad$/i, '');
-    return `${baseName}${suffix}.${ext}`;
-  }, [fileName]);
+    // For STL: send STL data directly, check if multicolor 3MF is also available
+    // For 3MF: send the 3MF as STL fallback (slicer needs STL)
+    // For multicolor-3mf: send with color groups for multi-material slicing
 
-  // Keep blobs in state for SendToPrinter (updated when cache changes)
-  const [cachedBlobs, setCachedBlobs] = useState<Map<ExportType, Blob>>(new Map());
+    // Always need STL data for slicing
+    const stlCacheKey = await computeCacheKey(source, params, 'stl');
+    let stlData = await getCachedRender(stlCacheKey);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function updateBlobs() {
-      const blobs = new Map<ExportType, Blob>();
-      for (const fmt of ALL_FORMATS) {
-        if (cachedFormats.has(fmt)) {
-          const blob = await getExportBlob(fmt);
-          if (blob) blobs.set(fmt, blob);
-        }
+    if (format === 'stl') {
+      if (!stlData) {
+        onToast?.('Render STL first before sending to printer');
+        return;
       }
-      if (!cancelled) setCachedBlobs(blobs);
+      // Check if multicolor 3MF is also cached for color info
+      let colorGroups: ColorGroup[] | undefined;
+      const multicolorKey = await computeCacheKey(source, params, 'multicolor-3mf');
+      const multicolorData = await getCachedRender(multicolorKey);
+      if (multicolorData) {
+        const groups = extractColorGroups(multicolorData);
+        if (groups.length > 1) colorGroups = groups;
+      }
+      const baseName = fileName.replace(/\.scad$/i, '');
+      onSendToPrinter(printer, stlData, `${baseName}.stl`, colorGroups, colorGroups ? multicolorData! : undefined);
+    } else if (format === '3mf') {
+      // For plain 3MF, we still need STL for the slicer
+      if (!stlData) {
+        onToast?.('Render STL first — the slicer needs STL data');
+        return;
+      }
+      const baseName = fileName.replace(/\.scad$/i, '');
+      onSendToPrinter(printer, stlData, `${baseName}.stl`);
+    } else if (format === 'multicolor-3mf') {
+      // Multicolor: need STL + multicolor 3MF for color groups
+      if (!stlData) {
+        onToast?.('Render STL first — the slicer needs STL data');
+        return;
+      }
+      const multicolorKey = await computeCacheKey(source, params, 'multicolor-3mf');
+      const multicolorData = await getCachedRender(multicolorKey);
+      if (!multicolorData) {
+        onToast?.('Render Multi-Color 3MF first');
+        return;
+      }
+      let colorGroups: ColorGroup[] | undefined;
+      const groups = extractColorGroups(multicolorData);
+      if (groups.length > 1) colorGroups = groups;
+      const baseName = fileName.replace(/\.scad$/i, '');
+      onSendToPrinter(printer, stlData, `${baseName}.stl`, colorGroups, multicolorData);
     }
-    updateBlobs();
-    return () => { cancelled = true; };
-  }, [cachedFormats, getExportBlob]);
+  }, [onSendToPrinter, source, params, fileName, onToast]);
 
-  function renderFormatRow(format: ExportType) {
+  const hasPrinters = printers.length > 0 && onSendToPrinter;
+
+  function renderFormatSection(format: ExportType) {
     const isCached = cachedFormats.has(format);
     const isRendering = exporting === format;
     const label = formatLabel(format);
-    const blob = cachedBlobs.get(format);
 
     return (
-      <div key={format} className="export-format-row">
-        <button
-          className="export-render-btn"
-          onClick={() => handleRender(format)}
-          disabled={isDisabled || exporting !== null}
-          title={format === 'multicolor-3mf' ? 'Render with per-color separation for multi-material printing' : undefined}
-        >
-          {isRendering ? `Rendering ${label}…` : isCached ? `Re-render ${label}` : `Render ${label}`}
-        </button>
-        {isCached && !isRendering && (
-          <>
+      <div key={format} className="export-section">
+        <h4 className="export-section-title">{label}</h4>
+        <div className="export-section-actions">
+          <button
+            className="export-render-btn"
+            onClick={() => handleRender(format)}
+            disabled={isDisabled || exporting !== null}
+            title={format === 'multicolor-3mf' ? 'Render with per-color separation for multi-material printing' : undefined}
+          >
+            {isRendering ? `Rendering…` : isCached ? `Re-render` : `Render`}
+          </button>
+          {isCached && !isRendering && (
             <button
               className="export-download-btn"
               onClick={() => handleDownload(format)}
               title={`Download cached ${label}`}
             >
-              Download {label}
+              Download
             </button>
-            {blob && printers.length > 0 && (
-              <SendToPrinter
-                printers={printers}
-                fileBlob={blob}
-                fileName={getExportFileName(format)}
-                onSuccess={(msg) => onToast?.(msg)}
-                onError={(msg) => onToast?.(msg)}
-              />
-            )}
-          </>
-        )}
+          )}
+          {isCached && !isRendering && hasPrinters && (
+            <SendToPrinterButton
+              printers={printers}
+              onSelectPrinter={(printer) => handleSendForFormat(format, printer)}
+              label="Send to Printer"
+            />
+          )}
+        </div>
       </div>
     );
   }
@@ -211,9 +233,7 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
   return (
     <div className="export-controls">
       <h3>Export</h3>
-      <div className="export-format-list">
-        {ALL_FORMATS.map((fmt) => renderFormatRow(fmt))}
-      </div>
+      {ALL_FORMATS.map((fmt) => renderFormatSection(fmt))}
       {openscad.logs.length > 0 && (
         <pre className="openscad-logs" ref={logRef}>{openscad.logs.join('\n')}</pre>
       )}

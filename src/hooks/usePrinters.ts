@@ -4,6 +4,10 @@ export interface Printer {
   id: string;
   name: string;
   address: string;
+  /** Printer profile ID from printer-profiles.ts (e.g. 'flashforge-adv5m'), or empty for generic */
+  profileId?: string;
+  /** Selected nozzle diameter in mm (e.g. 0.4) */
+  nozzleDiameter?: number;
 }
 
 const STORAGE_KEY = 'moonraker-printers';
@@ -32,14 +36,14 @@ export function usePrinters() {
     savePrinters(printers);
   }, [printers]);
 
-  const addPrinter = useCallback((name: string, address: string) => {
-    const printer: Printer = { id: crypto.randomUUID(), name, address };
+  const addPrinter = useCallback((name: string, address: string, profileId?: string, nozzleDiameter?: number) => {
+    const printer: Printer = { id: crypto.randomUUID(), name, address, profileId, nozzleDiameter };
     setPrinters((prev) => [...prev, printer]);
   }, []);
 
-  const updatePrinter = useCallback((id: string, name: string, address: string) => {
+  const updatePrinter = useCallback((id: string, name: string, address: string, profileId?: string, nozzleDiameter?: number) => {
     setPrinters((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, name, address } : p)),
+      prev.map((p) => (p.id === id ? { ...p, name, address, profileId, nozzleDiameter } : p)),
     );
   }, []);
 

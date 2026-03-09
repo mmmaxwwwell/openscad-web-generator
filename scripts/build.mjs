@@ -8,7 +8,7 @@
  */
 
 import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -64,11 +64,22 @@ async function main() {
     console.log('=== QR bundle already present, skipping ===');
   }
 
-  // Step 4: Vite build
+  // Step 4: Copy Kiri:Moto slicer WASM
+  const kiriWasmSrc = join(ROOT, 'vendor', 'kiri-engine', 'src', 'wasm', 'kiri-geo.wasm');
+  const kiriWasmDest = join(WASM_DIR, 'kiri-geo.wasm');
+  if (existsSync(kiriWasmSrc)) {
+    mkdirSync(WASM_DIR, { recursive: true });
+    copyFileSync(kiriWasmSrc, kiriWasmDest);
+    console.log('=== Copied kiri-geo.wasm to public/wasm/ ===');
+  } else {
+    console.warn('Warning: kiri-geo.wasm not found in vendor/kiri-engine/. Slicer will not work.');
+  }
+
+  // Step 5: Vite build
   console.log('\n=== Building with Vite ===');
   run('npx vite build');
 
-  // Step 5: Summary
+  // Step 6: Summary
   console.log('\n=== Build Complete ===');
   console.log('Output: dist/');
 }

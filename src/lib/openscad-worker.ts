@@ -74,7 +74,14 @@ let cachedModules: {
 async function loadModules() {
   if (cachedModules) return cachedModules;
 
-  const base = self.location.origin + (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  // The worker lives in the assets/ subdirectory of the build output.
+  // For relative BASE_URL (APK: './'), resolve from one level up to get the app root.
+  // For absolute BASE_URL (GitHub Pages: '/openscad-web-generator/'), it resolves correctly regardless.
+  const baseUrl = import.meta.env.BASE_URL || '/';
+  const appRoot = baseUrl.startsWith('/')
+    ? new URL(baseUrl, self.location.origin).href
+    : new URL('../' + baseUrl, self.location.href).href;
+  const base = appRoot.replace(/\/$/, '');
   // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS
   const openscadModule = await import(/* @vite-ignore */ `${base}/wasm/openscad.js`);
   // @ts-ignore — runtime-resolved public assets, not statically resolvable by TS

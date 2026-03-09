@@ -163,6 +163,8 @@ The multi-color 3MF export technique is inspired by [colorscad](https://github.c
 
 ## Disclaimer
 
+**WARNING: This project is in active development and is NOT ready for production use.** Do not use this software unless you understand what you are doing. The author assumes no responsibility or liability for any damage to your machines, printers, or other equipment resulting from the use of this software. Use entirely at your own risk.
+
 This project is entirely vibe coded. The UI looks like ass.
 
 ## Android APK

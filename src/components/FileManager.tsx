@@ -7,6 +7,7 @@ interface ExampleFile {
 }
 
 const BUNDLED_EXAMPLES: ExampleFile[] = [
+  { name: '1cm Cube', path: '/examples/cube_1cm.scad' },
   { name: 'Big Chapstick (BOSL2)', path: '/examples/big_chapstick.scad' },
   { name: 'CSG Operations', path: '/examples/CSG.scad' },
   { name: 'OpenSCAD Logo', path: '/examples/logo.scad' },

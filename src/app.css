@@ -1,3 +1,52 @@
+/* ─── Disclaimer Dialog ───────────────────────────── */
+.disclaimer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.disclaimer-dialog {
+  background: #fff;
+  border-radius: 8px;
+  padding: 2rem;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.disclaimer-dialog h2 {
+  margin-bottom: 1rem;
+  color: #c62828;
+  font-size: 1.25rem;
+}
+
+.disclaimer-dialog p {
+  margin: 0.75rem 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.disclaimer-ok-btn {
+  display: block;
+  margin: 1.5rem auto 0;
+  padding: 0.6rem 2rem;
+  font-size: 1rem;
+  font-weight: 600;
+  background: #c62828;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.disclaimer-ok-btn:hover {
+  background: #b71c1c;
+}
+
 /* ─── GitHub Corner ────────────────────────────────── */
 .github-corner:hover .octo-arm {
   animation: octocat-wave 560ms ease-in-out;
@@ -408,20 +457,31 @@ input:focus, select:focus {
   margin-bottom: 1.5rem;
 }
 
-.export-format-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+.export-section {
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #e0e0e0;
 }
 
-.export-format-row {
+.export-section:last-of-type {
+  border-bottom: none;
+}
+
+.export-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.export-section-actions {
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .export-render-btn {
   flex: 1;
+  min-width: 80px;
 }
 
 .export-error {
@@ -723,6 +783,31 @@ input:focus, select:focus {
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
 }
 
+.printer-profile-label {
+  font-size: 0.75rem;
+  color: #888;
+  font-style: italic;
+}
+
+.printer-profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.printer-profile-field > span {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.printer-profile-field select {
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #ccc;
+  font-size: 0.85rem;
+}
+
 .printer-actions {
   display: flex;
   gap: 0.25rem;
@@ -734,17 +819,20 @@ input:focus, select:focus {
 }
 
 .printer-delete-btn {
-  border: none;
-  background: transparent;
-  color: #999;
-  font-size: 1.1rem;
-  padding: 0.1rem 0.4rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  color: #dc3545;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.5rem;
   line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .printer-delete-btn:hover:not(:disabled) {
-  color: #dc3545;
-  background: transparent;
+  color: #fff;
+  background: #dc3545;
+  border-color: #dc3545;
 }
 
 .printer-edit-form {
@@ -792,6 +880,55 @@ input:focus, select:focus {
 .printer-add-btn:hover:not(:disabled) {
   background: #1a7a30;
   border-color: #1a7a30;
+}
+
+/* ─── Printer Network Scan ────────────────────────── */
+.printer-scan-section {
+  padding: 0.75rem 0;
+  border-top: 1px solid #444;
+}
+
+.printer-scan-btn {
+  width: 100%;
+  background: #004085;
+  color: #fff;
+  border-color: #004085;
+  font-weight: 500;
+  padding: 0.5rem;
+}
+
+.printer-scan-btn:hover:not(:disabled) {
+  background: #0056b3;
+  border-color: #0056b3;
+}
+
+.printer-scan-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.printer-scan-results {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+.printer-scan-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem 0.5rem;
+  background: #1a3a1a;
+  border: 1px solid #2a5a2a;
+  border-radius: 4px;
+  margin-top: 0.4rem;
+}
+
+.printer-scan-empty {
+  color: #aaa;
+  font-size: 0.85rem;
+  text-align: center;
+  margin: 0.5rem 0 0;
 }
 
 /* ─── Send to Printer ─────────────────────────────── */
@@ -861,4 +998,663 @@ input:focus, select:focus {
   font-size: 0.75rem;
   color: #666;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/* ─── Filament Manager ────────────────────────────── */
+.filament-dialog {
+  max-width: 520px;
+}
+
+.filament-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.filament-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #ddd;
+  border-bottom: none;
+  background: #fafafa;
+}
+
+.filament-list-item:first-child {
+  border-radius: 6px 6px 0 0;
+}
+
+.filament-list-item:last-child {
+  border-bottom: 1px solid #ddd;
+  border-radius: 0 0 6px 6px;
+}
+
+.filament-list-item:only-child {
+  border-radius: 6px;
+}
+
+.filament-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.filament-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.filament-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.filament-builtin-badge {
+  font-size: 0.65rem;
+  color: #666;
+  background: #e8e8e8;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  font-weight: 400;
+  margin-left: 0.3rem;
+}
+
+.filament-details {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.filament-notes {
+  font-size: 0.75rem;
+  color: #999;
+  font-style: italic;
+}
+
+.filament-actions {
+  display: flex;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.filament-add-btn {
+  margin-top: 0.25rem;
+}
+
+.filament-add-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.filament-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.filament-form-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.filament-form-row > .filament-form-field {
+  flex: 1;
+}
+
+.filament-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.filament-form-field input {
+  width: 100%;
+}
+
+.filament-form-actions {
+  display: flex;
+  gap: 0.35rem;
+  margin-top: 0.25rem;
+}
+
+.filament-save-btn {
+  background: #155724;
+  color: #fff;
+  border-color: #155724;
+  font-weight: 500;
+}
+
+.filament-save-btn:hover:not(:disabled) {
+  background: #1a7a30;
+  border-color: #1a7a30;
+}
+
+/* ─── Print Dialog ────────────────────────────────── */
+.print-dialog {
+  max-width: 540px;
+}
+
+.print-dialog-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f0f4f8;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.print-dialog-printer {
+  font-weight: 600;
+  color: #333;
+}
+
+.print-dialog-filament {
+  color: #555;
+}
+
+.print-dialog-filament-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #555;
+  font-size: 0.9em;
+}
+
+.print-dialog-filament-select select {
+  flex: 1;
+  padding: 2px 4px;
+  font-size: 0.95em;
+}
+
+.print-dialog-subheading {
+  margin: 12px 0 6px;
+  font-size: 0.85em;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.print-dialog-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 0.75rem;
+}
+
+.print-dialog-tab {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid #ddd;
+  background: #f5f5f5;
+  border-radius: 4px;
+  color: #555;
+  cursor: pointer;
+}
+
+.print-dialog-tab:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.print-dialog-tab--active {
+  background: #155724;
+  color: #fff;
+  border-color: #155724;
+}
+
+.print-dialog-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+  min-height: 120px;
+}
+
+.print-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #555;
+}
+
+.print-dialog-field input,
+.print-dialog-field select {
+  width: 100%;
+}
+
+.print-dialog-field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.print-dialog-field--checkbox input {
+  width: auto;
+}
+
+.print-dialog-hint {
+  font-size: 0.75rem;
+  color: #888;
+  font-style: italic;
+  margin: 0.25rem 0 0;
+}
+
+.print-dialog-extruder-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.print-dialog-color-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 90px;
+}
+
+.print-dialog-color-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid #555;
+  flex-shrink: 0;
+}
+
+.print-dialog-gcode {
+  font-family: monospace;
+  font-size: 0.8rem;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.print-dialog-slice-btn {
+  width: 100%;
+  padding: 0.6rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  background: #155724;
+  color: #fff;
+  border: 1px solid #155724;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.print-dialog-slice-btn:hover:not(:disabled) {
+  background: #1a7a30;
+  border-color: #1a7a30;
+}
+
+.print-dialog-slice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.print-dialog-progress {
+  padding: 1.5rem 0;
+  text-align: center;
+}
+
+.print-dialog-progress-label {
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+  color: #333;
+  text-transform: capitalize;
+}
+
+.print-dialog-progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.print-dialog-progress-fill {
+  height: 100%;
+  background: #155724;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.print-dialog-done {
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.print-dialog-success {
+  font-weight: 600;
+  color: #155724;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.print-dialog-done p {
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.print-dialog-done-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.print-dialog-close-btn {
+}
+
+.print-dialog-error {
+  padding: 1rem 0;
+}
+
+.print-dialog-error p {
+  color: #721c24;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.print-dialog-error-detail {
+  font-size: 0.8rem;
+  background: #f8d7da;
+  border: 1px solid #f5c6cb;
+  border-radius: 4px;
+  padding: 0.5rem;
+  color: #721c24;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.print-dialog-error-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.print-dialog-overridable-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.print-dialog-from-profile {
+  font-size: 0.7rem;
+  color: #999;
+  font-weight: 400;
+  font-style: italic;
+}
+
+.print-dialog-reset-btn {
+  font-size: 0.65rem;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid #d4a017;
+  background: #fff8e1;
+  color: #b8860b;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.print-dialog-reset-btn:hover {
+  background: #fff0b3;
+  border-color: #b8860b;
+}
+
+/* ─── Responsive / Mobile-First ──────────────────── */
+@media (max-width: 768px) {
+  .app-container {
+    padding: 0.75rem;
+  }
+
+  .app-container--files {
+    max-width: 100%;
+  }
+
+  .editor-header {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .editor-title {
+    font-size: 1rem;
+    flex: 1 1 100%;
+    order: -1;
+  }
+
+  .editor-layout {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .preview-3d-container {
+    height: 300px;
+  }
+
+  .preview-panel {
+    position: static;
+  }
+
+  .export-section-actions {
+    flex-wrap: wrap;
+  }
+
+  .printer-settings-dialog {
+    width: 95%;
+    padding: 1rem;
+    max-height: 90vh;
+  }
+
+  h1 {
+    font-size: 1.25rem;
+  }
+
+  .param-set-save {
+    flex-direction: column;
+  }
+
+  .file-list-item {
+    padding: 0.5rem;
+    gap: 0.5rem;
+  }
+
+  .s3-config {
+    padding: 0.75rem;
+  }
+
+  .toast {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: 0.75rem;
+  }
+
+  /* ─── Print Dialog — Mobile ─── */
+  .print-dialog {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100%;
+  }
+
+  .print-dialog-summary {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+
+  .print-dialog-filament-select {
+    width: 100%;
+  }
+
+  .print-dialog-filament-select select {
+    flex: 1;
+  }
+
+  .print-dialog-tabs {
+    gap: 4px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .print-dialog-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .print-dialog-tab {
+    padding: 0.45rem 0.65rem;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-height: 36px;
+  }
+
+  .print-dialog-section {
+    min-height: 80px;
+  }
+
+  .print-dialog-field input,
+  .print-dialog-field select {
+    min-height: 40px;
+    font-size: 1rem;
+  }
+
+  .print-dialog-field--checkbox input {
+    min-height: auto;
+    width: 20px;
+    height: 20px;
+  }
+
+  .print-dialog-extruder-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+
+  .print-dialog-color-label {
+    min-width: auto;
+  }
+
+  .print-dialog-extruder-row select {
+    width: 100%;
+  }
+
+  .print-dialog-gcode {
+    font-size: 0.85rem;
+    min-height: 80px;
+  }
+
+  .print-dialog-slice-btn {
+    min-height: 48px;
+    font-size: 1rem;
+  }
+
+  .print-dialog-done-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .print-dialog-done-actions button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .print-dialog-error-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .print-dialog-error-actions button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  /* ─── Filament Manager — Mobile ─── */
+  .filament-dialog {
+    max-width: 100%;
+    width: 100%;
+    border-radius: 0;
+    max-height: 100vh;
+    height: 100%;
+  }
+
+  .filament-form-row {
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  .filament-form-field input {
+    min-height: 40px;
+    font-size: 1rem;
+  }
+
+  .filament-form-actions button {
+    min-height: 44px;
+  }
+
+  .filament-actions button {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 0.3rem 0.5rem;
+  }
+
+  /* ─── Send to Printer dropdown — Mobile ─── */
+  .send-to-printer-dropdown {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);
+    max-height: 50vh;
+    overflow-y: auto;
+    z-index: 3000;
+  }
+
+  .send-to-printer-option {
+    padding: 0.75rem 1rem;
+    min-height: 48px;
+  }
+
+  /* ─── Printer list — larger touch targets ─── */
+  .printer-edit-btn,
+  .printer-delete-btn {
+    min-height: 36px;
+    min-width: 36px;
+    font-size: 0.85rem;
+    padding: 0.3rem 0.6rem;
+  }
+
+  .printer-add-btn {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .printer-scan-btn {
+    min-height: 48px;
+  }
+
+  /* ─── Preview grid — tighter minimum on mobile ─── */
+  .preview-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
 }

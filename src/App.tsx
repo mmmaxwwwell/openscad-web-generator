@@ -11,12 +11,21 @@ import { ParameterSetSelector } from './components/ParameterSetSelector';
 import { PreviewPanel } from './components/PreviewPanel';
 import { ExportControls } from './components/ExportControls';
 import { PrinterSettings } from './components/PrinterSettings';
+import { PrintDialog } from './components/PrintDialog';
 import { Toast } from './components/Toast';
 import { playDing } from './lib/notification-sound';
 import { usePrinters } from './hooks/usePrinters';
+import { usePrinterConfig } from './hooks/usePrinterConfig';
+import { useFilaments } from './hooks/useFilaments';
+import { useSlicer } from './hooks/useSlicer';
+import { uploadToMoonraker } from './components/SendToPrinter';
+import type { Printer } from './hooks/usePrinters';
 import type { OutputFormat } from './lib/openscad-api';
+import type { ColorGroup } from './lib/merge-3mf';
 
 const paramSetStorage = new BrowserParamSetStorage();
+
+const DISCLAIMER_ACCEPTED_KEY = 'disclaimer-accepted';
 
 // Reserved URL param keys (not treated as SCAD parameter overrides)
 const RESERVED_PARAMS = new Set(['example', 'file']);
@@ -103,6 +112,16 @@ function readInitialUrlParams() {
 const initialUrlParams = readInitialUrlParams();
 
 function App() {
+  // ─── Disclaimer dialog ────────────────────────────────
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(
+    () => localStorage.getItem(DISCLAIMER_ACCEPTED_KEY) === 'true',
+  );
+
+  const handleAcceptDisclaimer = useCallback(() => {
+    localStorage.setItem(DISCLAIMER_ACCEPTED_KEY, 'true');
+    setDisclaimerAccepted(true);
+  }, []);
+
   // ─── Storage configuration ──────────────────────────────
   const [storageBackend, setStorageBackend] = useState<'browser' | 's3'>('browser');
   const [s3Config, setS3Config] = useState<S3Config>({
@@ -312,6 +331,44 @@ function App() {
   const { printers, addPrinter, updatePrinter, deletePrinter } = usePrinters();
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
 
+  // ─── Print Dialog (slice & send) ──────────────────────
+  const [printDialogState, setPrintDialogState] = useState<{
+    printer: Printer;
+    stlData: ArrayBuffer;
+    fileName: string;
+    colorGroups?: ColorGroup[];
+    threeMfData?: ArrayBuffer;
+  } | null>(null);
+
+  // Use the active print-dialog printer's profile for filament defaults,
+  // falling back to the first printer's profile if no dialog is open
+  const activeProfilePrinter = printDialogState?.printer ?? printers[0];
+  const { filaments } = useFilaments(activeProfilePrinter?.profileId, activeProfilePrinter?.nozzleDiameter);
+  const slicer = useSlicer();
+  const printerConfig = usePrinterConfig(printDialogState?.printer.address ?? null);
+
+  // filaments list passed to PrintDialog for per-extruder selection
+
+  const handleSendToPrinter = useCallback((printer: Printer, stlData: ArrayBuffer, fileName: string, colorGroups?: ColorGroup[], threeMfData?: ArrayBuffer) => {
+    setPrintDialogState({ printer, stlData, fileName, colorGroups, threeMfData });
+  }, []);
+
+  const handleSlice = useCallback(async (
+    stlData: ArrayBuffer,
+    processSettings: Record<string, unknown>,
+    deviceSettings: Record<string, unknown>,
+    tools?: unknown[],
+    multiColorMeshes?: import('./lib/kiri-engine').MultiColorMesh[],
+  ) => {
+    return slicer.slice(stlData, processSettings, deviceSettings, tools, multiColorMeshes);
+  }, [slicer]);
+
+  const handleUploadGcode = useCallback(async (gcode: string, gcodeFileName: string) => {
+    if (!printDialogState) throw new Error('No printer selected');
+    const blob = new Blob([gcode], { type: 'text/plain' });
+    await uploadToMoonraker(printDialogState.printer.address, blob, gcodeFileName);
+  }, [printDialogState]);
+
   // ─── Toast / notification ─────────────────────────────
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -324,6 +381,33 @@ function App() {
     setToastMessage(null);
   }, []);
 
+  // ─── Android back button handling ─────────────────────
+  useEffect(() => {
+    const handler = () => {
+      // Priority: close PrintDialog > close PrinterSettings > go back to files > exit app
+      if (printDialogState) {
+        setPrintDialogState(null);
+        return true;
+      }
+      if (showPrinterSettings) {
+        setShowPrinterSettings(false);
+        return true;
+      }
+      if (selectedFileId && fileSource) {
+        handleBackToFiles();
+        return true;
+      }
+      // Nothing to go back to — let Android close the app
+      return false;
+    };
+
+    // Expose handler for the Android bridge
+    (window as unknown as Record<string, unknown>).__onAndroidBack = handler;
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__onAndroidBack;
+    };
+  }, [printDialogState, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles]);
+
   // ─── GitHub corner ─────────────────────────────────────
   const githubCorner = (
     <a href="https://github.com/mmmaxwwwell/openscad-web-generator" className="github-corner" aria-label="View source on GitHub">
@@ -335,11 +419,33 @@ function App() {
     </a>
   );
 
+  // ─── Disclaimer dialog ─────────────────────────────────
+  const disclaimerDialog = !disclaimerAccepted && (
+    <div className="disclaimer-overlay">
+      <div className="disclaimer-dialog">
+        <h2>Development Software — Use at Your Own Risk</h2>
+        <p>
+          This software is <strong>in active development</strong> and is <strong>not ready for
+          production use</strong>. Do not use it unless you understand what you are doing.
+        </p>
+        <p>
+          The author assumes <strong>no responsibility or liability</strong> for any damage to your
+          machines, printers, or other equipment resulting from the use of this software.
+        </p>
+        <p>Use entirely at your own risk.</p>
+        <button className="disclaimer-ok-btn" onClick={handleAcceptDisclaimer}>
+          OK, I understand
+        </button>
+      </div>
+    </div>
+  );
+
   // ─── Render ────────────────────────────────────────────
   // File selection screen
   if (!selectedFileId || !fileSource) {
     return (
       <div className="app-container app-container--files">
+        {disclaimerDialog}
         {githubCorner}
         <h1>OpenSCAD Web Parameter Editor</h1>
         <FileManager
@@ -355,6 +461,22 @@ function App() {
           storageBackend={storageBackend}
           onStorageBackendChange={setStorageBackend}
         />
+        <button
+          className="printer-settings-btn"
+          onClick={() => setShowPrinterSettings(true)}
+          title="Manage Moonraker printers"
+        >
+          &#9881; Printers
+        </button>
+        {showPrinterSettings && (
+          <PrinterSettings
+            printers={printers}
+            onAdd={addPrinter}
+            onUpdate={updatePrinter}
+            onDelete={deletePrinter}
+            onClose={() => setShowPrinterSettings(false)}
+          />
+        )}
         {storageBackend === 's3' && (
           <div className="s3-config">
             <h3>S3 Configuration</h3>
@@ -415,6 +537,7 @@ function App() {
   // Editor screen (file loaded & parsed)
   return (
     <div className="app-container">
+      {disclaimerDialog}
       {githubCorner}
       <div className="editor-header">
         <button onClick={handleBackToFiles}>&larr; Back to Files</button>
@@ -466,6 +589,7 @@ function App() {
               onModelGenerated={handleModelGenerated}
               onRenderComplete={handleRenderComplete}
               onToast={setToastMessage}
+              onSendToPrinter={handleSendToPrinter}
             />
           </div>
 
@@ -485,6 +609,26 @@ function App() {
           onUpdate={updatePrinter}
           onDelete={deletePrinter}
           onClose={() => setShowPrinterSettings(false)}
+        />
+      )}
+      {printDialogState && (
+        <PrintDialog
+          printer={printDialogState.printer}
+          printerConfig={printerConfig.config}
+          printerConfigLoading={printerConfig.loading}
+          filaments={filaments}
+          stlData={printDialogState.stlData}
+          fileName={printDialogState.fileName}
+          colorGroups={printDialogState.colorGroups}
+          threeMfData={printDialogState.threeMfData}
+          onSlice={handleSlice}
+          slicerStatus={slicer.status}
+          slicerProgress={slicer.progress}
+          slicerError={slicer.error}
+          slicerDebugLog={slicer.debugLog}
+          onUploadGcode={handleUploadGcode}
+          onClose={() => setPrintDialogState(null)}
+          onToast={setToastMessage}
         />
       )}
       <Toast message={toastMessage} onDismiss={handleDismissToast} />

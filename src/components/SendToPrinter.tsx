@@ -19,11 +19,16 @@ function buildUploadUrl(address: string): string {
   return `http://${address}/server/files/upload`;
 }
 
-async function uploadToMoonraker(address: string, blob: Blob, fileName: string): Promise<void> {
+export async function uploadToMoonraker(address: string, blob: Blob, fileName: string): Promise<void> {
   const url = buildUploadUrl(address);
 
-  // Warn early about mixed content (HTTPS page → HTTP API)
-  if (window.location.protocol === 'https:' && url.startsWith('http://')) {
+  // Warn early about mixed content (HTTPS page → HTTP API).
+  // The Android WebView injects a native bridge that explicitly permits cleartext traffic,
+  // so we check that rather than sniffing the origin string.
+  const nativeBridge = (window as any).AndroidPrinterDiscovery;
+  const cleartextAllowed = typeof nativeBridge?.allowsCleartextTraffic === 'function'
+    && nativeBridge.allowsCleartextTraffic();
+  if (!cleartextAllowed && window.location.protocol === 'https:' && url.startsWith('http://')) {
     throw new Error(
       'Mixed content blocked: cannot send to an HTTP printer from an HTTPS page. ' +
       'Either access this app over HTTP, or put Moonraker behind an HTTPS reverse proxy.',

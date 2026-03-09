@@ -1,0 +1,254 @@
+/** Copyright Stewart Allen <sa@grid.space> -- All Rights Reserved */
+
+import '../../add/array.js';
+import '../../add/class.js';
+import '../../add/three.js';
+import { api } from '../app/api.js';
+import { conf } from '../app/conf/defaults.js';
+import { client } from '../app/workers.js';
+import { load } from '../../load/file.js';
+import { newWidget } from '../core/widget.js';
+
+class Engine {
+    constructor({ workURL, poolURL } = {}) {
+        this.widget = newWidget();
+        this.widgets = [this.widget]; // all widgets (single or multi-color)
+        this.settings = {
+            mode: "FDM",
+            controller: {},
+            render: false,
+            filter: { FDM: "internal" },
+            device: conf.defaults.fdm.d, // device profile
+            process: conf.defaults.fdm.p, // slicing settings
+            widget: { [this.widget.id]: {} }
+        };
+        this.listener = () => { };
+        try {
+            client.setWorkPath(workURL);
+            client.setPoolPath(poolURL);
+            client.restart();
+        } catch (error) {
+            console.log({ error });
+        }
+    }
+
+    load(url) {
+        return new Promise((accept, reject) => {
+            try {
+                new load.STL().load(url, vertices => {
+                    this.listener({ loaded: url, vertices });
+                    this.widget.loadVertices(vertices).center();
+                    accept(this);
+                });
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    clear() {
+        api.platform.clear();
+    }
+
+    parse(data) {
+        return new Promise((accept, reject) => {
+            try {
+                let vertices = new load.STL().parse(data);
+                this.listener({ parsed: data, vertices });
+                this.widget.loadVertices(vertices).center();
+                accept(this);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+
+    /**
+     * Load multiple meshes for multi-color/multi-extruder printing.
+     * Each entry should have { vertices: Float32Array, extruder: number }.
+     * Creates one widget per mesh with anno.extruder set.
+     */
+    parseMultiColor(meshes) {
+        this.widgets = [];
+        this.settings.widget = {};
+        for (const mesh of meshes) {
+            const widget = newWidget();
+            widget.loadVertices(mesh.vertices).center();
+            widget.anno.extruder = mesh.extruder;
+            this.widgets.push(widget);
+            this.settings.widget[widget.id] = {};
+        }
+        // Keep this.widget pointing to the first widget for compatibility
+        this.widget = this.widgets[0];
+        this.listener({ parsedMulti: meshes.length });
+        return this;
+    }
+
+    setThreading(bool) {
+        if (bool) {
+            client.pool.start();
+        } else {
+            client.pool.stop();
+        }
+    }
+
+    setListener(listener) {
+        this.listener = listener;
+        return this;
+    }
+
+    setRender(bool) {
+        this.settings.render = bool;
+        return this;
+    }
+
+    /**
+     * Sets the mode of the engine. Valid modes are:
+     * @param {"FDM"|"CAM"|"LASER"|"SLA"} mode - the mode to set
+     * @returns {Engine} this
+     */
+    setMode(mode) {
+        this.settings.mode = mode;
+        return this;
+    }
+
+    setDevice(device) {
+        Object.assign(this.settings.device, device);
+        return this;
+    }
+
+    setProcess(process) {
+        Object.assign(this.settings.process, process);
+        return this;
+    }
+
+    setController(controller) {
+        let ctrl = this.settings.controller;
+        Object.assign(ctrl, controller);
+        if (ctrl.threaded) {
+            client.pool.start();
+        } else {
+            client.pool.stop();
+        }
+        return this;
+    }
+
+    setTools(tools) {
+        this.settings.tools = tools;
+        return this;
+    }
+
+    setStock(stock) {
+        let { settings } = this;
+        let { process } = settings;
+        settings.stock = stock;
+        process.camStockX = stock.x;
+        process.camStockY = stock.y;
+        process.camStockZ = stock.z;
+        if (this.origin) settings.stock.center = origin;
+        return this;
+    }
+
+    setTopOffset(offset = 0) {
+        this.topOffset = offset;
+    }
+
+    setOrigin(x, y, z) {
+        this.origin = { x, y, z };
+        if (this.settings.stock) this.settings.stock.center = { x, y, z };
+        return this;
+    }
+
+    moveTo(x, y, z) {
+        this.widget.move(x, y, z, true);
+        return this;
+    }
+
+    move(x, y, z) {
+        this.widget.move(x, y, z);
+        return this;
+    }
+
+    scale(x, y, z) {
+        this.widget.scale(x, y, z);
+        return this;
+    }
+
+    rotate(x, y, z) {
+        this.widget.rotate(x, y, z);
+        return this;
+    }
+
+    slice() {
+        const topZ = (this.settings?.stock?.z || 0) - (this.topOffset || 0);
+        const widgets = this.widgets;
+        for (const w of widgets) {
+            w.setTopZ(topZ);
+        }
+        return new Promise((accept, reject) => {
+            client.clear();
+            client.sync(widgets);
+            client.rotate(this.settings);
+
+            // Slice each widget sequentially
+            let idx = 0;
+            const sliceNext = () => {
+                if (idx >= widgets.length) {
+                    accept(this);
+                    return;
+                }
+                const widget = widgets[idx];
+                client.slice(this.settings, widget, msg => {
+                    // Scale progress: each widget gets an equal share
+                    if (msg.update !== undefined) {
+                        const base = idx / widgets.length;
+                        const scaled = base + msg.update / widgets.length;
+                        this.listener({ slice: { ...msg, update: scaled } });
+                    } else {
+                        this.listener({ slice: msg });
+                    }
+                    if (msg.error) {
+                        reject(msg.error);
+                    }
+                    if (msg.done) {
+                        idx++;
+                        sliceNext();
+                    }
+                });
+            };
+            sliceNext();
+        });
+    }
+
+    prepare() {
+        return new Promise((accept, reject) => {
+            client.prepare(this.settings, update => {
+                this.listener({ prepare: { update } });
+            }, done => {
+                this.listener({ prepare: { done: true } });
+                accept(this);
+            });
+        });
+    }
+
+    export() {
+        return new Promise((accept, reject) => {
+            let output = [];
+            client.export(this.settings, segment => {
+                if (typeof segment === 'string') {
+                    this.listener({ export: { segment } });
+                    output.push(segment);
+                }
+            }, done => {
+                this.listener({ export: { done } });
+                accept(output.join('\r\n'));
+            });
+        });
+    }
+}
+
+export function newEngine() {
+    return new Engine(...arguments);
+}
+
+export { Engine };

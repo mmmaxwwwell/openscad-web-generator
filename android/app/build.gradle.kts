@@ -2,6 +2,26 @@ plugins {
     id("com.android.application")
 }
 
+val buildWebApp by tasks.registering(Exec::class) {
+    workingDir = file("${project.rootDir}/..")
+    environment("VITE_APK", "1")
+    commandLine("node", "scripts/build.mjs")
+    inputs.files(fileTree("${project.rootDir}/..") {
+        include("src/**", "index.html", "vite.config.ts", "package.json", "public/**")
+    })
+    outputs.dir("${project.rootDir}/../dist")
+}
+
+val copyWebAssets by tasks.registering(Copy::class) {
+    dependsOn(buildWebApp)
+    from("${project.rootDir}/../dist")
+    into("src/main/assets/webapp")
+}
+
+tasks.named("preBuild") {
+    dependsOn(copyWebAssets)
+}
+
 android {
     namespace = "io.github.mmmaxwwwell.openscadweb"
     compileSdk = 35

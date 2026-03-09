@@ -11,7 +11,135 @@
  *   Metadata/model_settings.config  (slicer metadata for Bambu/Orca/Prusa)
  */
 
-import { zipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
+
+/** Color group extracted from a multi-color 3MF file. */
+export interface ColorGroup {
+  /** Index in the color group array (0-based) */
+  index: number;
+  /** sRGB hex color string (#RRGGBB or #RRGGBBAA) */
+  colorHex: string;
+}
+
+/**
+ * Extract color groups from a multi-color 3MF file.
+ * Returns the list of colors found in colorgroup elements, in order.
+ * Returns empty array if no color groups found (single-color model).
+ */
+/** A per-color-group mesh extracted from a multi-color 3MF, ready for Kiri:Moto. */
+export interface ColorMesh {
+  /** Extruder index (0-based, from color group order) */
+  extruder: number;
+  /** sRGB hex color string */
+  colorHex: string;
+  /** Triangle vertices as Float32Array (x,y,z triples — 9 floats per triangle) */
+  vertices: Float32Array;
+}
+
+/**
+ * Extract per-color-group meshes from a multi-color 3MF file.
+ * Each mesh's vertices are returned as a flat Float32Array (same format as STL parser output).
+ * Returns empty array if the 3MF has no color groups or only one mesh.
+ */
+export function extractColorMeshes(threeMfData: ArrayBuffer): ColorMesh[] {
+  try {
+    const unzipped = unzipSync(new Uint8Array(threeMfData));
+
+    let modelXml: string | undefined;
+    for (const [path, data] of Object.entries(unzipped)) {
+      if (path.toLowerCase().endsWith('3dmodel.model')) {
+        modelXml = new TextDecoder().decode(data);
+        break;
+      }
+    }
+    if (!modelXml) return [];
+
+    // Parse colorgroups: <colorgroup id="N"><color color="#RRGGBBAA" /></colorgroup>
+    const colorGroupMap = new Map<string, string>(); // id → colorHex
+    const colorGroupOrder: string[] = []; // ordered list of colorgroup IDs
+    const cgRe = /<colorgroup\s+id="(\d+)"[^>]*>\s*<color\s+color="([^"]+)"\s*\/>\s*<\/colorgroup>/g;
+    let cgMatch: RegExpExecArray | null;
+    while ((cgMatch = cgRe.exec(modelXml)) !== null) {
+      colorGroupMap.set(cgMatch[1], cgMatch[2]);
+      colorGroupOrder.push(cgMatch[1]);
+    }
+    if (colorGroupMap.size < 2) return []; // single-color, no need to split
+
+    // Parse mesh objects with colorgroup assignment:
+    // <object id="N" ... pid="colorGroupId" ...><mesh><vertices>...</vertices><triangles>...</triangles></mesh></object>
+    const objectRe = /<object\s+[^>]*id="(\d+)"[^>]*pid="(\d+)"[^>]*>[\s\S]*?<vertices>([\s\S]*?)<\/vertices>\s*<triangles>([\s\S]*?)<\/triangles>[\s\S]*?<\/object>/g;
+    const meshes: ColorMesh[] = [];
+    let objMatch: RegExpExecArray | null;
+    while ((objMatch = objectRe.exec(modelXml)) !== null) {
+      const pid = objMatch[2];
+      const colorHex = colorGroupMap.get(pid);
+      if (!colorHex) continue;
+
+      const extruder = colorGroupOrder.indexOf(pid);
+      if (extruder < 0) continue;
+
+      // Parse vertices
+      const vertexData: number[] = [];
+      const vertexRe = /<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"\s*\/>/g;
+      let vMatch: RegExpExecArray | null;
+      while ((vMatch = vertexRe.exec(objMatch[3])) !== null) {
+        vertexData.push(parseFloat(vMatch[1]), parseFloat(vMatch[2]), parseFloat(vMatch[3]));
+      }
+
+      // Parse triangles and emit vertex triples
+      const triangleVerts: number[] = [];
+      const triRe = /<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"\s*\/>/g;
+      let tMatch: RegExpExecArray | null;
+      while ((tMatch = triRe.exec(objMatch[4])) !== null) {
+        for (const vi of [parseInt(tMatch[1]), parseInt(tMatch[2]), parseInt(tMatch[3])]) {
+          triangleVerts.push(vertexData[vi * 3], vertexData[vi * 3 + 1], vertexData[vi * 3 + 2]);
+        }
+      }
+
+      if (triangleVerts.length > 0) {
+        meshes.push({
+          extruder,
+          colorHex,
+          vertices: new Float32Array(triangleVerts),
+        });
+      }
+    }
+
+    return meshes;
+  } catch {
+    return [];
+  }
+}
+
+export function extractColorGroups(threeMfData: ArrayBuffer): ColorGroup[] {
+  try {
+    const unzipped = unzipSync(new Uint8Array(threeMfData));
+
+    // Find the 3D model file
+    let modelXml: string | undefined;
+    for (const [path, data] of Object.entries(unzipped)) {
+      if (path.toLowerCase().endsWith('3dmodel.model')) {
+        modelXml = new TextDecoder().decode(data);
+        break;
+      }
+    }
+    if (!modelXml) return [];
+
+    // Extract color values from colorgroup elements
+    // Format: <colorgroup id="N"><color color="#RRGGBBAA" /></colorgroup>
+    const colorGroups: ColorGroup[] = [];
+    const colorGroupRe = /<colorgroup[^>]*>\s*<color\s+color="([^"]+)"\s*\/>\s*<\/colorgroup>/g;
+    let match: RegExpExecArray | null;
+    let index = 0;
+    while ((match = colorGroupRe.exec(modelXml)) !== null) {
+      colorGroups.push({ index, colorHex: match[1] });
+      index++;
+    }
+    return colorGroups;
+  } catch {
+    return [];
+  }
+}
 
 export interface ColoredModel {
   /** RGBA color in linear space, as [r, g, b, a] with values 0–1 */
