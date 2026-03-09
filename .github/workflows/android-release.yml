@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.ANDROID_SIGNING_KEY != '' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +55,7 @@ jobs:
         run: gradle assembleRelease
 
       - name: Sign APK
-        if: ${{ secrets.ANDROID_SIGNING_KEY != '' }}
+        if: ${{ env.HAS_SIGNING_KEY == 'true' }}
         uses: r0adkll/sign-android-release@v1
         id: sign
         with:
