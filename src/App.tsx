@@ -10,8 +10,10 @@ import { ParameterEditor } from './components/ParameterEditor';
 import { ParameterSetSelector } from './components/ParameterSetSelector';
 import { PreviewPanel } from './components/PreviewPanel';
 import { ExportControls } from './components/ExportControls';
+import { PrinterSettings } from './components/PrinterSettings';
 import { Toast } from './components/Toast';
 import { playDing } from './lib/notification-sound';
+import { usePrinters } from './hooks/usePrinters';
 import type { OutputFormat } from './lib/openscad-api';
 
 const paramSetStorage = new BrowserParamSetStorage();
@@ -306,6 +308,10 @@ function App() {
     setCustomSets(sets.map((s) => ({ name: s.name, values: s.values })));
   }, [selectedFileId]);
 
+  // ─── Printer management ─────────────────────────────
+  const { printers, addPrinter, updatePrinter, deletePrinter } = usePrinters();
+  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
+
   // ─── Toast / notification ─────────────────────────────
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -420,6 +426,13 @@ function App() {
           {openscad.status === 'rendering' && 'WASM: Rendering…'}
           {openscad.status === 'error' && 'WASM: Error'}
         </span>
+        <button
+          className="printer-settings-btn"
+          onClick={() => setShowPrinterSettings(true)}
+          title="Manage Moonraker printers"
+        >
+          &#9881; Printers
+        </button>
       </div>
 
       {parsedFile?.description && (
@@ -449,8 +462,10 @@ function App() {
               params={paramValues}
               openscad={openscad}
               fileName={selectedFileId}
+              printers={printers}
               onModelGenerated={handleModelGenerated}
               onRenderComplete={handleRenderComplete}
+              onToast={setToastMessage}
             />
           </div>
 
@@ -462,6 +477,15 @@ function App() {
             />
           </div>
         </div>
+      )}
+      {showPrinterSettings && (
+        <PrinterSettings
+          printers={printers}
+          onAdd={addPrinter}
+          onUpdate={updatePrinter}
+          onDelete={deletePrinter}
+          onClose={() => setShowPrinterSettings(false)}
+        />
       )}
       <Toast message={toastMessage} onDismiss={handleDismissToast} />
     </div>

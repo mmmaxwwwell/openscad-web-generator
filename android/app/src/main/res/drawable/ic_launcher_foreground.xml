@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 3D cube icon representing OpenSCAD -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 L84,37 L84,71 L54,88 L24,71 L24,37 Z" />
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M54,20 L84,37 L54,54 L24,37 Z" />
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M54,54 L84,37 L84,71 L54,88 Z" />
+    <path
+        android:fillColor="#1E88E5"
+        android:pathData="M54,54 L24,37 L24,71 L54,88 Z" />
+</vector>

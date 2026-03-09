@@ -147,6 +147,12 @@ Three export options are available:
 - **3MF** — single color wrapped in 3MF container
 - **Multi-Color 3MF** — one mesh per color, with color group metadata for slicers
 
+## Send to Printer (Klipper / Moonraker)
+
+If you're running [Klipper](https://www.klipper3d.org/) with [Moonraker](https://moonraker.readthedocs.io/), you can send exported files directly to your printer from the app. Add your printer's address in the Printer Settings panel and use the "Send to Printer" button after exporting.
+
+Because the web app is served over HTTPS, browsers block requests to HTTP printer addresses on the local network (mixed content). To work around this, install the **Android APK** from the [Releases](https://github.com/mmmaxwwwell/openscad-web-generator/releases) page — it wraps the web app in a WebView that allows cleartext HTTP traffic to your printers.
+
 ## Libraries
 
 Bundles [BOSL2](https://github.com/BelfrySCAD/BOSL2) and [scadqr](https://github.com/xypwn/scadqr) so they're available via `include` in uploaded `.scad` files.
@@ -158,6 +164,37 @@ The multi-color 3MF export technique is inspired by [colorscad](https://github.c
 ## Disclaimer
 
 This project is entirely vibe coded. The UI looks like ass.
+
+## Android APK
+
+An Android wrapper app is included that loads the web app in a WebView with cleartext HTTP enabled, allowing direct communication with Moonraker printers on your local network.
+
+### Building locally
+
+```bash
+npm run apk            # build debug APK
+npm run apk:install    # build and install to connected device via ADB
+```
+
+Requires `gradle`, `jdk17`, and `android-tools` — all included in the Nix dev shell.
+
+### Releases
+
+The GitHub Actions workflow at `.github/workflows/android-release.yml` automatically builds a signed APK and creates a GitHub Release when you push a version tag:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+Tags must match the format `vX.X.X` (e.g., `v1.0.0`, `v2.3.1`).
+
+To enable APK signing in CI, add these repository secrets:
+
+- `ANDROID_SIGNING_KEY` — base64-encoded keystore (`base64 -w 0 release.keystore`)
+- `ANDROID_KEY_ALIAS` — key alias
+- `ANDROID_KEYSTORE_PASSWORD` — keystore password
+- `ANDROID_KEY_PASSWORD` — key password
 
 ## Development
 

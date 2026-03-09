@@ -2,15 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ScadValue } from '../types';
 import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
 import type { OutputFormat } from '../lib/openscad-api';
+import type { Printer } from '../hooks/usePrinters';
 import { computeCacheKey, getCachedRender, setCachedRender, hasCachedRender } from '../lib/render-cache';
+import { SendToPrinter } from './SendToPrinter';
 
 interface ExportControlsProps {
   source: string;
   params: Record<string, ScadValue>;
   openscad: UseOpenSCADResult;
   fileName: string;
+  printers: Printer[];
   onModelGenerated?: (data: ArrayBuffer, format: OutputFormat) => void;
   onRenderComplete?: () => void;
+  onToast?: (message: string) => void;
 }
 
 type ExportType = OutputFormat | 'multicolor-3mf';
@@ -33,7 +37,7 @@ function formatSuffix(format: ExportType): string {
   return format === 'multicolor-3mf' ? '-multicolor' : '';
 }
 
-export function ExportControls({ source, params, openscad, fileName, onModelGenerated, onRenderComplete }: ExportControlsProps) {
+export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast }: ExportControlsProps) {
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
@@ -128,10 +132,47 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
 
   const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
 
+  const getExportBlob = useCallback(async (format: ExportType): Promise<Blob | null> => {
+    if (!source) return null;
+    const cacheKey = await computeCacheKey(source, params, format);
+    const data = await getCachedRender(cacheKey);
+    if (!data) return null;
+    const ext = formatExt(format);
+    const mimeType = ext === '3mf' ? 'model/3mf' : 'model/stl';
+    return new Blob([data], { type: mimeType });
+  }, [source, params]);
+
+  const getExportFileName = useCallback((format: ExportType): string => {
+    const ext = formatExt(format);
+    const suffix = formatSuffix(format);
+    const baseName = fileName.replace(/\.scad$/i, '');
+    return `${baseName}${suffix}.${ext}`;
+  }, [fileName]);
+
+  // Keep blobs in state for SendToPrinter (updated when cache changes)
+  const [cachedBlobs, setCachedBlobs] = useState<Map<ExportType, Blob>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    async function updateBlobs() {
+      const blobs = new Map<ExportType, Blob>();
+      for (const fmt of ALL_FORMATS) {
+        if (cachedFormats.has(fmt)) {
+          const blob = await getExportBlob(fmt);
+          if (blob) blobs.set(fmt, blob);
+        }
+      }
+      if (!cancelled) setCachedBlobs(blobs);
+    }
+    updateBlobs();
+    return () => { cancelled = true; };
+  }, [cachedFormats, getExportBlob]);
+
   function renderFormatRow(format: ExportType) {
     const isCached = cachedFormats.has(format);
     const isRendering = exporting === format;
     const label = formatLabel(format);
+    const blob = cachedBlobs.get(format);
 
     return (
       <div key={format} className="export-format-row">
@@ -144,13 +185,24 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
           {isRendering ? `Rendering ${label}…` : isCached ? `Re-render ${label}` : `Render ${label}`}
         </button>
         {isCached && !isRendering && (
-          <button
-            className="export-download-btn"
-            onClick={() => handleDownload(format)}
-            title={`Download cached ${label}`}
-          >
-            Download {label}
-          </button>
+          <>
+            <button
+              className="export-download-btn"
+              onClick={() => handleDownload(format)}
+              title={`Download cached ${label}`}
+            >
+              Download {label}
+            </button>
+            {blob && printers.length > 0 && (
+              <SendToPrinter
+                printers={printers}
+                fileBlob={blob}
+                fileName={getExportFileName(format)}
+                onSuccess={(msg) => onToast?.(msg)}
+                onError={(msg) => onToast?.(msg)}
+              />
+            )}
+          </>
         )}
       </div>
     );

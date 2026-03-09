@@ -9,7 +9,19 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+          config.android_sdk.accept_license = true;
+        };
+        androidSdk = pkgs.androidenv.composeAndroidPackages {
+          buildToolsVersions = [ "34.0.0" "35.0.0" ];
+          platformVersions = [ "35" ];
+          includeEmulator = false;
+          includeNDK = false;
+          includeSources = false;
+          includeSystemImages = false;
+        };
       in
       {
         devShells.default = pkgs.mkShell {
@@ -17,7 +29,13 @@
             pkgs.nodejs_22
             pkgs.nodePackages.npm
             pkgs.gnumake
+            pkgs.gradle
+            pkgs.jdk17
+            pkgs.android-tools
           ];
+
+          JAVA_HOME = "${pkgs.jdk17}";
+          ANDROID_HOME = "${androidSdk.androidsdk}/libexec/android-sdk";
         };
 
         packages.openscad-wasm = pkgs.callPackage ./nix/openscad-wasm.nix {};
