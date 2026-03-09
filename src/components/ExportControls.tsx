@@ -1,0 +1,126 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ScadValue } from '../types';
+import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
+import type { OutputFormat } from '../lib/openscad-api';
+
+interface ExportControlsProps {
+  source: string;
+  params: Record<string, ScadValue>;
+  openscad: UseOpenSCADResult;
+  fileName: string;
+  onModelGenerated?: (data: ArrayBuffer, format: OutputFormat) => void;
+}
+
+type ExportType = OutputFormat | 'multicolor-3mf';
+
+export function ExportControls({ source, params, openscad, fileName, onModelGenerated }: ExportControlsProps) {
+  const [exporting, setExporting] = useState<ExportType | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [errorLogs, setErrorLogs] = useState<string[]>([]);
+  const logRef = useRef<HTMLPreElement>(null);
+
+  // Auto-scroll log panel to bottom as new lines arrive
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  }, [openscad.logs]);
+
+  const handleExport = useCallback(async (format: OutputFormat) => {
+    if (!source) return;
+
+    setExporting(format);
+    setError(null);
+    setErrorLogs([]);
+    try {
+      const data = await openscad.render(source, params, format);
+      onModelGenerated?.(data, format);
+      const ext = format === '3mf' ? '3mf' : 'stl';
+      const mimeType = format === '3mf' ? 'model/3mf' : 'model/stl';
+      const blob = new Blob([data], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+
+      const baseName = fileName.replace(/\.scad$/i, '');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+      if (err.logs) setErrorLogs(err.logs);
+    } finally {
+      setExporting(null);
+    }
+  }, [source, params, openscad, fileName]);
+
+  const handleMulticolorExport = useCallback(async () => {
+    if (!source) return;
+
+    setExporting('multicolor-3mf');
+    setError(null);
+    setErrorLogs([]);
+    try {
+      const data = await openscad.renderMulticolor(source, params);
+      onModelGenerated?.(data, '3mf');
+      const blob = new Blob([data], { type: 'model/3mf' });
+      const url = URL.createObjectURL(blob);
+
+      const baseName = fileName.replace(/\.scad$/i, '');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}-multicolor.3mf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Multi-color export failed');
+      if (err.logs) setErrorLogs(err.logs);
+    } finally {
+      setExporting(null);
+    }
+  }, [source, params, openscad, fileName]);
+
+  const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
+
+  return (
+    <div className="export-controls">
+      <h3>Export</h3>
+      <div className="export-buttons">
+        <button
+          onClick={() => handleExport('stl')}
+          disabled={isDisabled || exporting !== null}
+        >
+          {exporting === 'stl' ? 'Exporting STL…' : 'Export STL'}
+        </button>
+        <button
+          onClick={() => handleExport('3mf')}
+          disabled={isDisabled || exporting !== null}
+        >
+          {exporting === '3mf' ? 'Exporting 3MF…' : 'Export 3MF'}
+        </button>
+        <button
+          onClick={handleMulticolorExport}
+          disabled={isDisabled || exporting !== null}
+          title="Export with per-color separation for multi-material printing"
+        >
+          {exporting === 'multicolor-3mf' ? 'Exporting Multi-Color…' : 'Export Multi-Color 3MF'}
+        </button>
+      </div>
+      {openscad.logs.length > 0 && (
+        <pre className="openscad-logs" ref={logRef}>{openscad.logs.join('\n')}</pre>
+      )}
+      {error && (
+        <div className="export-error">
+          <div>{error}</div>
+          {errorLogs.length > 0 && (
+            <pre className="openscad-logs">{errorLogs.join('\n')}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
