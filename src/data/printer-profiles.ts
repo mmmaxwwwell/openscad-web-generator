@@ -86,7 +86,7 @@ export interface PrinterProfile {
 // FlashForge Adventurer 5M
 // ---------------------------------------------------------------------------
 
-const ADV5M_START_GCODE = `START_PRINT BED_TEMP={first_layer_bed_temperature[0]} EXTRUDER_TEMP={first_layer_temperature[0]}`;
+const ADV5M_START_GCODE = `START_PRINT BED_TEMP={bed_temp} EXTRUDER_TEMP={temp}`;
 
 const ADV5M_END_GCODE = `END_PRINT`;
 

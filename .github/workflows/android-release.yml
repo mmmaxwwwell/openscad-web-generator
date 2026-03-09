@@ -53,6 +53,7 @@ jobs:
         run: gradle assembleRelease
 
       - name: Sign APK
+        if: ${{ secrets.ANDROID_SIGNING_KEY != '' }}
         uses: r0adkll/sign-android-release@v1
         id: sign
         with:
@@ -66,7 +67,11 @@ jobs:
 
       - name: Rename APK
         run: |
-          mv ${{ steps.sign.outputs.signedReleaseFile }} openscad-web-generator-${{ steps.version.outputs.name }}.apk
+          if [ -n "${{ steps.sign.outputs.signedReleaseFile }}" ]; then
+            mv ${{ steps.sign.outputs.signedReleaseFile }} openscad-web-generator-${{ steps.version.outputs.name }}.apk
+          else
+            mv android/app/build/outputs/apk/release/*.apk openscad-web-generator-${{ steps.version.outputs.name }}.apk
+          fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
