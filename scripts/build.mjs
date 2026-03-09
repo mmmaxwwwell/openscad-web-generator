@@ -24,10 +24,15 @@ function run(cmd, opts = {}) {
 async function main() {
   const forceWasm = process.argv.includes('--force-wasm');
   const skipWasm = process.argv.includes('--skip-wasm');
+  const buildWasm = process.argv.includes('--build-wasm');
 
-  // Step 1: Download WASM if needed
+  // Step 1: Download or build WASM if needed
   if (skipWasm) {
     console.log('=== Skipping WASM download (--skip-wasm) ===');
+  } else if (buildWasm) {
+    console.log('=== Building OpenSCAD WASM from source ===');
+    const args = forceWasm ? ' --force' : '';
+    run(`node scripts/build-wasm.mjs${args}`);
   } else {
     const wasmExists = existsSync(join(WASM_DIR, 'openscad.wasm'));
     if (!wasmExists || forceWasm) {

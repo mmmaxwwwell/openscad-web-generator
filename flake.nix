@@ -16,8 +16,11 @@
           buildInputs = [
             pkgs.nodejs_22
             pkgs.nodePackages.npm
+            pkgs.gnumake
           ];
         };
+
+        packages.openscad-wasm = pkgs.callPackage ./nix/openscad-wasm.nix {};
 
         packages.default = pkgs.buildNpmPackage {
           pname = "openscad-web-generator";
