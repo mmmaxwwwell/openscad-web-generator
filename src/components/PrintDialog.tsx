@@ -194,6 +194,18 @@ function buildProcessSettings(
   };
 }
 
+/**
+ * Replace common PrusaSlicer/OrcaSlicer variable syntax with Kiri:Moto equivalents.
+ * e.g. {first_layer_bed_temperature[0]} → {bed_temp}
+ */
+function migrateGcodeVars(gcode: string): string {
+  return gcode
+    .replace(/\{first_layer_bed_temperature\[\d+\]\}/g, '{bed_temp}')
+    .replace(/\{first_layer_temperature\[\d+\]\}/g, '{temp}')
+    .replace(/\{bed_temperature\[\d+\]\}/g, '{bed_temp}')
+    .replace(/\{temperature\[\d+\]\}/g, '{temp}');
+}
+
 /** Build Kiri:Moto device settings from printer config */
 function buildDeviceSettings(
   pc: PrinterConfig | null,
@@ -211,14 +223,18 @@ function buildDeviceSettings(
     device.bedRound = pc.bedCircular;
   }
   if (ps.startGcode) {
-    device.gcodePre = ps.startGcode.split('\n').filter((l) => l.trim());
+    device.gcodePre = migrateGcodeVars(ps.startGcode).split('\n').filter((l) => l.trim());
   }
   if (ps.endGcode) {
-    device.gcodePost = ps.endGcode.split('\n').filter((l) => l.trim());
+    device.gcodePost = migrateGcodeVars(ps.endGcode).split('\n').filter((l) => l.trim());
   }
   if (ps.toolChangeGcode) {
     device.gcodeChange = ps.toolChangeGcode.split('\n').filter((l) => l.trim());
   }
+  // Fan control gcode — Kiri doesn't emit M106/M107 without this
+  device.gcodeFan = ['M106 S{fan_speed}'];
+  // Layer change comment
+  device.gcodeLayer = [';LAYER:{layer}'];
   const nozzle = pc?.nozzleDiameter ?? 0.4;
   const filament = pc?.filamentDiameter ?? 1.75;
   if (extruderCount > 1 && getFilamentForExtruder && filaments) {
