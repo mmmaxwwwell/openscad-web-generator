@@ -23,6 +23,8 @@ export interface UseOpenSCADResult {
   error: string | null;
   /** OpenSCAD log output (stdout + stderr) from the last operation. */
   logs: string[];
+  /** Clear logs and error state. */
+  clearLogs: () => void;
   /** Initialize the WASM module (called automatically, but can be called eagerly). */
   init: () => Promise<void>;
   /** Render scad source with parameter overrides to STL or 3MF. */
@@ -171,5 +173,10 @@ export function useOpenSCAD(): UseOpenSCADResult {
     }
   }, [init, ensureApi, resetWorker, updateStatus]);
 
-  return { status, error, logs, init, render, renderMulticolor };
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+    setError(null);
+  }, []);
+
+  return { status, error, logs, clearLogs, init, render, renderMulticolor };
 }

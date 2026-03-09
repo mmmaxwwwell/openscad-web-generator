@@ -3,19 +3,12 @@ import {
   parseScadFile,
   parseParams,
   parseParamSets,
-  parseViewpoints,
   parseValue,
 } from '../scad-parser';
 
 // ─── Test fixture: complete scad file ────────────────────
 
 const FIXTURE = `\
-// BEGIN_VIEWPOINTS
-// 25,35,0,0,0,0,200       // Front perspective
-// 0,0,0,0,0,0,300         // Top down
-// 90,0,45,0,0,0,180       // Angled side
-// END_VIEWPOINTS
-
 // BEGIN_PARAMS
 // The overall width of the box in mm.
 // Must be at least 10mm for structural integrity.
@@ -194,38 +187,6 @@ describe('parseParamSets', () => {
   });
 });
 
-// ─── parseViewpoints ─────────────────────────────────────
-
-describe('parseViewpoints', () => {
-  const vps = parseViewpoints(FIXTURE);
-
-  it('extracts all viewpoints', () => {
-    expect(vps).toHaveLength(3);
-  });
-
-  it('parses viewpoint values', () => {
-    expect(vps[0]).toEqual({
-      rotX: 25,
-      rotY: 35,
-      rotZ: 0,
-      transX: 0,
-      transY: 0,
-      transZ: 0,
-      distance: 200,
-      label: 'Front perspective',
-    });
-  });
-
-  it('parses viewpoint labels', () => {
-    expect(vps[1].label).toBe('Top down');
-    expect(vps[2].label).toBe('Angled side');
-  });
-
-  it('returns empty array when section is missing', () => {
-    expect(parseViewpoints('// no viewpoints')).toEqual([]);
-  });
-});
-
 // ─── parseScadFile (integration) ─────────────────────────
 
 describe('parseScadFile', () => {
@@ -233,7 +194,6 @@ describe('parseScadFile', () => {
     const result = parseScadFile(FIXTURE);
     expect(result.params).toHaveLength(7);
     expect(result.paramSets).toHaveLength(3);
-    expect(result.viewpoints).toHaveLength(3);
     expect(result.source).toBe(FIXTURE);
   });
 
@@ -241,7 +201,6 @@ describe('parseScadFile', () => {
     const result = parseScadFile('');
     expect(result.params).toEqual([]);
     expect(result.paramSets).toEqual([]);
-    expect(result.viewpoints).toEqual([]);
   });
 
   it('handles file with only params section', () => {
@@ -249,6 +208,5 @@ describe('parseScadFile', () => {
     const result = parseScadFile(source);
     expect(result.params).toHaveLength(1);
     expect(result.paramSets).toEqual([]);
-    expect(result.viewpoints).toEqual([]);
   });
 });

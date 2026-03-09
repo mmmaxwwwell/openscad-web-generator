@@ -1,10 +1,3 @@
-// BEGIN_VIEWPOINTS
-// 25,35,0,0,0,0,1800         // Front perspective
-// 0,0,0,0,0,0,2000           // Top down
-// 90,0,0,0,0,0,1800          // Side view
-// 55,0,25,0,0,0,2000         // Isometric
-// END_VIEWPOINTS
-
 include <BOSL2/std.scad>
 include <BOSL2/gears.scad>
 scaleFactor = 4.38;

@@ -528,3 +528,58 @@ input:focus, select:focus {
 .s3-config-fields input {
   width: 100%;
 }
+
+/* ─── Toast ───────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  background: #155724;
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: opacity 0.3s, transform 0.3s;
+  z-index: 2000;
+}
+
+.toast--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast--hidden {
+  opacity: 0;
+  transform: translateY(1rem);
+  pointer-events: none;
+}
+
+/* ─── Export Controls ─ Download Button ───────────── */
+.export-download {
+  margin-top: 0.5rem;
+}
+
+.export-download-btn {
+  background: #155724;
+  color: #fff;
+  border-color: #155724;
+  font-weight: 500;
+}
+
+.export-download-btn:hover:not(:disabled) {
+  background: #1a7a30;
+  border-color: #1a7a30;
+}
+
+.export-cache-badge {
+  font-size: 0.7rem;
+  color: #155724;
+  background: #d4edda;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  margin-left: 0.35rem;
+  font-weight: 500;
+}

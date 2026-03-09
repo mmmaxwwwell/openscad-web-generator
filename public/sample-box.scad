@@ -1,9 +1,3 @@
-// BEGIN_VIEWPOINTS
-// 25,35,0,0,0,0,200       // Front perspective
-// 0,0,0,0,0,0,300         // Top down
-// 90,0,45,0,0,0,180       // Angled side
-// END_VIEWPOINTS
-
 // BEGIN_PARAMS
 // The overall width of the box in mm.
 // Must be at least 10mm for structural integrity.

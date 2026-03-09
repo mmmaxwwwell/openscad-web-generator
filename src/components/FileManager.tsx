@@ -25,6 +25,7 @@ interface FileManagerProps {
   onFileSelect: (fileId: string) => void;
   onFileUpload: (name: string, content: string) => Promise<void>;
   onFileDelete: (fileId: string) => Promise<void>;
+  onExampleLoad: (name: string, content: string) => void;
   onRefresh: () => Promise<void>;
   selectedFileId: string | null;
   storageBackend: 'browser' | 's3';
@@ -38,6 +39,7 @@ export function FileManager({
   onFileSelect,
   onFileUpload,
   onFileDelete,
+  onExampleLoad,
   onRefresh,
   selectedFileId,
   storageBackend,
@@ -74,11 +76,11 @@ export function FileManager({
       if (!res.ok) throw new Error(`Failed to fetch ${url}`);
       const content = await res.text();
       const fileName = example.path.split('/').pop()!;
-      await onFileUpload(fileName, content);
+      onExampleLoad(fileName, content);
     } finally {
       setLoadingExample(null);
     }
-  }, [onFileUpload]);
+  }, [onExampleLoad]);
 
   const handleDelete = useCallback(async (e: React.MouseEvent, fileId: string) => {
     e.stopPropagation();

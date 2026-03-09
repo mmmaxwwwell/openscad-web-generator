@@ -4,7 +4,7 @@ import type { ScadFile } from '../types';
 
 /**
  * React hook that parses a loaded .scad file source string
- * and returns structured data (params, param sets, viewpoints).
+ * and returns structured data (params, param sets).
  *
  * Returns null if source is empty/null.
  * Memoizes the parse result so it only re-parses when source changes.

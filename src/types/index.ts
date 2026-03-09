@@ -20,23 +20,10 @@ export interface ScadParamSet {
   values: Record<string, ScadValue>;
 }
 
-// A viewpoint from the VIEWPOINTS section
-export interface ScadViewpoint {
-  rotX: number;
-  rotY: number;
-  rotZ: number;
-  transX: number;
-  transY: number;
-  transZ: number;
-  distance: number;
-  label: string;          // empty string if no label provided
-}
-
 // Complete parsed result from a .scad file
 export interface ScadFile {
   params: ScadParam[];
   paramSets: ScadParamSet[];
-  viewpoints: ScadViewpoint[];
   source: string;         // full original file content
 }
 

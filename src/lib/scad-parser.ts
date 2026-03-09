@@ -3,7 +3,6 @@ import type {
   ScadParamSet,
   ScadParamType,
   ScadValue,
-  ScadViewpoint,
   ScadFile,
 } from '../types';
 
@@ -156,56 +155,12 @@ export function parseParamSets(source: string): ScadParamSet[] {
   return sets;
 }
 
-// ─── Viewpoints ──────────────────────────────────────────
-
-export function parseViewpoints(source: string): ScadViewpoint[] {
-  const section = extractSection(source, '// BEGIN_VIEWPOINTS', '// END_VIEWPOINTS');
-  if (!section) return [];
-
-  const viewpoints: ScadViewpoint[] = [];
-
-  for (const line of section.split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('//')) continue;
-
-    // Remove leading //
-    const content = trimmed.slice(2).trim();
-    if (!content) continue;
-
-    // Split on // to separate values from optional label
-    const parts = content.split('//');
-    const valuePart = parts[0].trim();
-    const label = parts.length > 1 ? parts[1].trim() : '';
-
-    // Parse comma-separated numbers
-    const nums = valuePart.split(',').map((s) => Number(s.trim()));
-    if (nums.length !== 7 || nums.some((n) => isNaN(n))) {
-      console.warn(`Skipping malformed viewpoint line: ${trimmed}`);
-      continue;
-    }
-
-    viewpoints.push({
-      rotX: nums[0],
-      rotY: nums[1],
-      rotZ: nums[2],
-      transX: nums[3],
-      transY: nums[4],
-      transZ: nums[5],
-      distance: nums[6],
-      label,
-    });
-  }
-
-  return viewpoints;
-}
-
 // ─── Full File Parser ────────────────────────────────────
 
 export function parseScadFile(source: string): ScadFile {
   return {
     params: parseParams(source),
     paramSets: parseParamSets(source),
-    viewpoints: parseViewpoints(source),
     source,
   };
 }

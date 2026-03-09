@@ -10,6 +10,8 @@ import { ParameterEditor } from './components/ParameterEditor';
 import { ParameterSetSelector } from './components/ParameterSetSelector';
 import { PreviewPanel } from './components/PreviewPanel';
 import { ExportControls } from './components/ExportControls';
+import { Toast } from './components/Toast';
+import { playDing } from './lib/notification-sound';
 import type { OutputFormat } from './lib/openscad-api';
 
 const paramSetStorage = new BrowserParamSetStorage();
@@ -32,6 +34,18 @@ function App() {
   );
   const storage = useStorage(storageConfig);
 
+  // ─── OpenSCAD WASM ─────────────────────────────────────
+  const openscad = useOpenSCAD();
+
+  // ─── 3D Preview state ─────────────────────────────────
+  const [previewData, setPreviewData] = useState<ArrayBuffer | null>(null);
+  const [previewFormat, setPreviewFormat] = useState<OutputFormat | null>(null);
+
+  const handleModelGenerated = useCallback((data: ArrayBuffer, format: OutputFormat) => {
+    setPreviewData(data);
+    setPreviewFormat(format);
+  }, []);
+
   // ─── File selection & loading ───────────────────────────
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [fileSource, setFileSource] = useState<string | null>(null);
@@ -41,13 +55,16 @@ function App() {
     setSelectedFileId(fileId);
     setFileSource(null);
     setFileLoadError(null);
+    setPreviewData(null);
+    setPreviewFormat(null);
+    openscad.clearLogs();
     try {
       const content = await storage.loadFile(fileId);
       setFileSource(content);
     } catch (err) {
       setFileLoadError(err instanceof Error ? err.message : 'Failed to load file');
     }
-  }, [storage]);
+  }, [storage, openscad]);
 
   const handleFileUpload = useCallback(async (name: string, content: string) => {
     await storage.saveFile(name, content);
@@ -60,6 +77,15 @@ function App() {
       setFileSource(null);
     }
   }, [storage, selectedFileId]);
+
+  const handleExampleLoad = useCallback((name: string, content: string) => {
+    setSelectedFileId(name);
+    setFileSource(content);
+    setFileLoadError(null);
+    setPreviewData(null);
+    setPreviewFormat(null);
+    openscad.clearLogs();
+  }, [openscad]);
 
   const handleBackToFiles = useCallback(() => {
     setSelectedFileId(null);
@@ -123,16 +149,16 @@ function App() {
     setCustomSets(sets.map((s) => ({ name: s.name, values: s.values })));
   }, [selectedFileId]);
 
-  // ─── OpenSCAD WASM ─────────────────────────────────────
-  const openscad = useOpenSCAD();
+  // ─── Toast / notification ─────────────────────────────
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // ─── 3D Preview state ─────────────────────────────────
-  const [previewData, setPreviewData] = useState<ArrayBuffer | null>(null);
-  const [previewFormat, setPreviewFormat] = useState<OutputFormat | null>(null);
+  const handleRenderComplete = useCallback(() => {
+    setToastMessage('Render complete — download ready!');
+    playDing();
+  }, []);
 
-  const handleModelGenerated = useCallback((data: ArrayBuffer, format: OutputFormat) => {
-    setPreviewData(data);
-    setPreviewFormat(format);
+  const handleDismissToast = useCallback(() => {
+    setToastMessage(null);
   }, []);
 
   // ─── GitHub corner ─────────────────────────────────────
@@ -160,6 +186,7 @@ function App() {
           onFileSelect={handleFileSelect}
           onFileUpload={handleFileUpload}
           onFileDelete={handleFileDelete}
+          onExampleLoad={handleExampleLoad}
           onRefresh={storage.refresh}
           selectedFileId={selectedFileId}
           storageBackend={storageBackend}
@@ -262,6 +289,7 @@ function App() {
               openscad={openscad}
               fileName={selectedFileId}
               onModelGenerated={handleModelGenerated}
+              onRenderComplete={handleRenderComplete}
             />
           </div>
 
@@ -274,6 +302,7 @@ function App() {
           </div>
         </div>
       )}
+      <Toast message={toastMessage} onDismiss={handleDismissToast} />
     </div>
   );
 }
