@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ScadParamSet, ScadValue } from './types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ScadParam, ScadParamSet, ScadValue } from './types';
 import type { S3Config, StorageConfig } from './lib/storage';
 import { useStorage } from './hooks/useStorage';
 import { useScadParser } from './hooks/useScadParser';
@@ -15,6 +15,69 @@ import { playDing } from './lib/notification-sound';
 import type { OutputFormat } from './lib/openscad-api';
 
 const paramSetStorage = new BrowserParamSetStorage();
+
+// Reserved URL param keys (not treated as SCAD parameter overrides)
+const RESERVED_PARAMS = new Set(['example', 'file']);
+
+/** Only valid OpenSCAD identifiers are accepted as parameter names from URLs */
+const VALID_PARAM_NAME = /^[a-zA-Z_]\w*$/;
+
+/** Parse a URL search param value into the correct ScadValue type based on param definition */
+function parseUrlParamValue(raw: string, paramDef: ScadParam | undefined): ScadValue {
+  if (!paramDef) return raw;
+  switch (paramDef.type) {
+    case 'number': {
+      const n = Number(raw);
+      return isNaN(n) ? paramDef.default : n;
+    }
+    case 'boolean':
+      return raw === 'true' || raw === '1';
+    case 'vector': {
+      try {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr) && arr.every((v: unknown) => typeof v === 'number')) return arr;
+      } catch { /* ignore */ }
+      return paramDef.default;
+    }
+    case 'enum':
+      return paramDef.options?.includes(raw) ? raw : paramDef.default;
+    default:
+      return raw;
+  }
+}
+
+/** Serialize a ScadValue for URL search params */
+function serializeParamValue(value: ScadValue): string {
+  if (Array.isArray(value)) return JSON.stringify(value);
+  return String(value);
+}
+
+/** Build URLSearchParams from current state */
+function buildSearchParams(
+  selectedFileId: string | null,
+  isExample: boolean,
+  paramValues: Record<string, ScadValue>,
+  paramDefaults: Record<string, ScadValue>,
+): URLSearchParams {
+  const params = new URLSearchParams();
+  if (!selectedFileId) return params;
+
+  if (isExample) {
+    params.set('example', selectedFileId);
+  } else {
+    params.set('file', selectedFileId);
+  }
+
+  // Only include params that differ from defaults
+  for (const [name, value] of Object.entries(paramValues)) {
+    const def = paramDefaults[name];
+    const serialized = serializeParamValue(value);
+    if (def !== undefined && serialized === serializeParamValue(def)) continue;
+    params.set(name, serialized);
+  }
+
+  return params;
+}
 
 function App() {
   // ─── Storage configuration ──────────────────────────────
@@ -50,9 +113,14 @@ function App() {
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [fileSource, setFileSource] = useState<string | null>(null);
   const [fileLoadError, setFileLoadError] = useState<string | null>(null);
+  const [isExample, setIsExample] = useState(false);
+
+  // URL param overrides to apply after file is parsed
+  const pendingUrlParamsRef = useRef<Record<string, string> | null>(null);
 
   const handleFileSelect = useCallback(async (fileId: string) => {
     setSelectedFileId(fileId);
+    setIsExample(false);
     setFileSource(null);
     setFileLoadError(null);
     setPreviewData(null);
@@ -80,6 +148,7 @@ function App() {
 
   const handleExampleLoad = useCallback((name: string, content: string) => {
     setSelectedFileId(name);
+    setIsExample(true);
     setFileSource(content);
     setFileLoadError(null);
     setPreviewData(null);
@@ -89,8 +158,11 @@ function App() {
 
   const handleBackToFiles = useCallback(() => {
     setSelectedFileId(null);
+    setIsExample(false);
     setFileSource(null);
     setFileLoadError(null);
+    // Clear URL params
+    window.history.replaceState(null, '', window.location.pathname);
   }, []);
 
   // ─── Scad file parsing ─────────────────────────────────
@@ -99,7 +171,7 @@ function App() {
   // ─── Parameter values (editable state) ──────────────────
   const [paramValues, setParamValues] = useState<Record<string, ScadValue>>({});
 
-  // Reset param values to defaults when a new file is parsed
+  // Reset param values to defaults when a new file is parsed, then apply any pending URL overrides
   useEffect(() => {
     if (!parsedFile) {
       setParamValues({});
@@ -109,12 +181,83 @@ function App() {
     for (const p of parsedFile.params) {
       defaults[p.name] = p.default;
     }
+
+    // Apply URL param overrides if present
+    const pending = pendingUrlParamsRef.current;
+    if (pending) {
+      pendingUrlParamsRef.current = null;
+      for (const [key, raw] of Object.entries(pending)) {
+        const paramDef = parsedFile.params.find((p) => p.name === key);
+        if (paramDef) {
+          defaults[key] = parseUrlParamValue(raw, paramDef);
+        }
+      }
+    }
+
     setParamValues(defaults);
   }, [parsedFile]);
 
   const handleParamChange = useCallback((name: string, value: ScadValue) => {
     setParamValues((prev) => ({ ...prev, [name]: value }));
   }, []);
+
+  // ─── URL sync: update URL when state changes ───────────
+  const paramDefaults = useMemo(() => {
+    if (!parsedFile) return {};
+    const defaults: Record<string, ScadValue> = {};
+    for (const p of parsedFile.params) defaults[p.name] = p.default;
+    return defaults;
+  }, [parsedFile]);
+
+  useEffect(() => {
+    const search = buildSearchParams(selectedFileId, isExample, paramValues, paramDefaults);
+    const newUrl = search.toString()
+      ? `${window.location.pathname}?${search.toString()}`
+      : window.location.pathname;
+    window.history.replaceState(null, '', newUrl);
+  }, [selectedFileId, isExample, paramValues, paramDefaults]);
+
+  // ─── URL sync: load from URL on initial mount ──────────
+  const hasLoadedFromUrl = useRef(false);
+  useEffect(() => {
+    if (hasLoadedFromUrl.current) return;
+    hasLoadedFromUrl.current = true;
+
+    const search = new URLSearchParams(window.location.search);
+    const exampleName = search.get('example');
+    const fileName = search.get('file');
+
+    if (!exampleName && !fileName) return;
+
+    // Collect non-reserved params as overrides (only valid identifiers)
+    const overrides: Record<string, string> = {};
+    for (const [key, value] of search.entries()) {
+      if (!RESERVED_PARAMS.has(key) && VALID_PARAM_NAME.test(key)) {
+        overrides[key] = value;
+      }
+    }
+    if (Object.keys(overrides).length > 0) {
+      pendingUrlParamsRef.current = overrides;
+    }
+
+    if (exampleName) {
+      // Fetch the example file
+      const url = `${import.meta.env.BASE_URL}examples/${exampleName}`;
+      fetch(url)
+        .then((res) => {
+          if (!res.ok) throw new Error(`Failed to fetch ${url}`);
+          return res.text();
+        })
+        .then((content) => {
+          handleExampleLoad(exampleName, content);
+        })
+        .catch((err) => {
+          setFileLoadError(err instanceof Error ? err.message : 'Failed to load example from URL');
+        });
+    } else if (fileName) {
+      handleFileSelect(fileName);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Parameter set application ─────────────────────────
   const handleApplyParamSet = useCallback((values: Record<string, ScadValue>) => {
@@ -264,6 +407,10 @@ function App() {
           {openscad.status === 'error' && 'WASM: Error'}
         </span>
       </div>
+
+      {parsedFile?.description && (
+        <p className="file-description">{parsedFile.description}</p>
+      )}
 
       {!parsedFile ? (
         <div>Parsing file...</div>

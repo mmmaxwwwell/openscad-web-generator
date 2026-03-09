@@ -155,10 +155,24 @@ export function parseParamSets(source: string): ScadParamSet[] {
   return sets;
 }
 
+// ─── Description ─────────────────────────────────────────
+
+export function parseDescription(source: string): string {
+  const section = extractSection(source, '// BEGIN_DESCRIPTION', '// END_DESCRIPTION');
+  if (!section) return '';
+  return section
+    .split('\n')
+    .map((l) => l.trim())
+    .map((l) => l.replace(/^\/\/\s?/, ''))
+    .filter((l) => l.length > 0)
+    .join('\n');
+}
+
 // ─── Full File Parser ────────────────────────────────────
 
 export function parseScadFile(source: string): ScadFile {
   return {
+    description: parseDescription(source),
     params: parseParams(source),
     paramSets: parseParamSets(source),
     source,

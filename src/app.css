@@ -382,14 +382,38 @@ input:focus, select:focus {
   min-width: 0;
 }
 
+/* ─── File Description ────────────────────────────── */
+.file-description {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  background: #1e2a3a;
+  border-left: 3px solid #4a9eff;
+  border-radius: 4px;
+  color: #c0c8d4;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
 /* ─── Export Controls ──────────────────────────────── */
 .export-controls {
   margin-bottom: 1.5rem;
 }
 
-.export-buttons {
+.export-format-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-format-row {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
+}
+
+.export-render-btn {
+  flex: 1;
 }
 
 .export-error {

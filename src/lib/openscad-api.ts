@@ -37,8 +37,11 @@ function nextId(): string {
  *   center = true;
  *   dims = [10, 20, 30];
  */
+/** Only allow valid OpenSCAD identifiers as parameter names to prevent code injection */
+const VALID_PARAM_NAME = /^[a-zA-Z_]\w*$/;
+
 export function injectParameters(source: string, params: Record<string, ScadValue>): string {
-  const entries = Object.entries(params);
+  const entries = Object.entries(params).filter(([name]) => VALID_PARAM_NAME.test(name));
   if (entries.length === 0) return source;
 
   // Append after source so overrides win (OpenSCAD uses last-assignment-wins)

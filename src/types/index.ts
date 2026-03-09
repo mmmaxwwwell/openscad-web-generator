@@ -22,6 +22,7 @@ export interface ScadParamSet {
 
 // Complete parsed result from a .scad file
 export interface ScadFile {
+  description: string;    // description from BEGIN_DESCRIPTION section
   params: ScadParam[];
   paramSets: ScadParamSet[];
   source: string;         // full original file content

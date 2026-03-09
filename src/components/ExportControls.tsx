@@ -17,24 +17,30 @@ type ExportType = OutputFormat | 'multicolor-3mf';
 
 const ALL_FORMATS: ExportType[] = ['stl', '3mf', 'multicolor-3mf'];
 
+function formatLabel(format: ExportType): string {
+  switch (format) {
+    case 'stl': return 'STL';
+    case '3mf': return '3MF';
+    case 'multicolor-3mf': return 'Multi-Color 3MF';
+  }
+}
+
+function formatExt(format: ExportType): string {
+  return format === 'stl' ? 'stl' : '3mf';
+}
+
+function formatSuffix(format: ExportType): string {
+  return format === 'multicolor-3mf' ? '-multicolor' : '';
+}
+
 export function ExportControls({ source, params, openscad, fileName, onModelGenerated, onRenderComplete }: ExportControlsProps) {
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
   const logRef = useRef<HTMLPreElement>(null);
 
-  // Last successful render result
-  const [lastRenderData, setLastRenderData] = useState<ArrayBuffer | null>(null);
-  const [lastRenderFormat, setLastRenderFormat] = useState<ExportType | null>(null);
-
   // Which formats have cache hits for current source+params
   const [cachedFormats, setCachedFormats] = useState<Set<ExportType>>(new Set());
-
-  // Clear render data when params or source change
-  useEffect(() => {
-    setLastRenderData(null);
-    setLastRenderFormat(null);
-  }, [source, params]);
 
   // Check cache for all formats when source/params change
   useEffect(() => {
@@ -87,8 +93,6 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
 
       const previewFormat: OutputFormat = format === 'multicolor-3mf' ? '3mf' : format;
       onModelGenerated?.(data, previewFormat);
-      setLastRenderData(data);
-      setLastRenderFormat(format);
       setCachedFormats((prev) => new Set(prev).add(format));
       onRenderComplete?.();
     } catch (err: any) {
@@ -99,15 +103,18 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
     }
   }, [source, params, openscad, onModelGenerated, onRenderComplete]);
 
-  const handleDownload = useCallback(() => {
-    if (!lastRenderData || !lastRenderFormat) return;
+  const handleDownload = useCallback(async (format: ExportType) => {
+    if (!source) return;
 
-    const is3mf = lastRenderFormat === '3mf' || lastRenderFormat === 'multicolor-3mf';
-    const ext = is3mf ? '3mf' : 'stl';
-    const mimeType = is3mf ? 'model/3mf' : 'model/stl';
-    const suffix = lastRenderFormat === 'multicolor-3mf' ? '-multicolor' : '';
+    const cacheKey = await computeCacheKey(source, params, format);
+    const data = await getCachedRender(cacheKey);
+    if (!data) return;
 
-    const blob = new Blob([lastRenderData], { type: mimeType });
+    const ext = formatExt(format);
+    const suffix = formatSuffix(format);
+    const mimeType = ext === '3mf' ? 'model/3mf' : 'model/stl';
+
+    const blob = new Blob([data], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const baseName = fileName.replace(/\.scad$/i, '');
     const a = document.createElement('a');
@@ -117,40 +124,44 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [lastRenderData, lastRenderFormat, fileName]);
+  }, [source, params, fileName]);
 
   const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
 
-  function renderButton(format: ExportType, label: string) {
+  function renderFormatRow(format: ExportType) {
     const isCached = cachedFormats.has(format);
     const isRendering = exporting === format;
+    const label = formatLabel(format);
+
     return (
-      <button
-        onClick={() => handleRender(format)}
-        disabled={isDisabled || exporting !== null}
-        title={format === 'multicolor-3mf' ? 'Render with per-color separation for multi-material printing' : undefined}
-      >
-        {isRendering ? `Rendering ${label}…` : `Render ${label}`}
-        {isCached && !isRendering && <span className="export-cache-badge">cached</span>}
-      </button>
+      <div key={format} className="export-format-row">
+        <button
+          className="export-render-btn"
+          onClick={() => handleRender(format)}
+          disabled={isDisabled || exporting !== null}
+          title={format === 'multicolor-3mf' ? 'Render with per-color separation for multi-material printing' : undefined}
+        >
+          {isRendering ? `Rendering ${label}…` : isCached ? `Re-render ${label}` : `Render ${label}`}
+        </button>
+        {isCached && !isRendering && (
+          <button
+            className="export-download-btn"
+            onClick={() => handleDownload(format)}
+            title={`Download cached ${label}`}
+          >
+            Download {label}
+          </button>
+        )}
+      </div>
     );
   }
 
   return (
     <div className="export-controls">
       <h3>Export</h3>
-      <div className="export-buttons">
-        {renderButton('stl', 'STL')}
-        {renderButton('3mf', '3MF')}
-        {renderButton('multicolor-3mf', 'Multi-Color 3MF')}
+      <div className="export-format-list">
+        {ALL_FORMATS.map((fmt) => renderFormatRow(fmt))}
       </div>
-      {lastRenderData && (
-        <div className="export-download">
-          <button className="export-download-btn" onClick={handleDownload}>
-            Download {lastRenderFormat === 'multicolor-3mf' ? 'Multi-Color 3MF' : lastRenderFormat?.toUpperCase()}
-          </button>
-        </div>
-      )}
       {openscad.logs.length > 0 && (
         <pre className="openscad-logs" ref={logRef}>{openscad.logs.join('\n')}</pre>
       )}

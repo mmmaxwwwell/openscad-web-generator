@@ -1,6 +1,12 @@
 include <BOSL2/std.scad>
 include <qr.scad>
 
+// BEGIN_DESCRIPTION
+// A protective case for the Fi Mini GPS tracker.
+// Held together by 6 M3x6 socket head cap screws.
+// Supports having a QR code on the top so you can include your contact info if the tracker is found.
+// END_DESCRIPTION
+
 // BEGIN_PARAMS
 // URL for the QR code on top of the case.
 // Leave empty for no QR code.
