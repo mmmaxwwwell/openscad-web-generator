@@ -69,8 +69,9 @@ export function FileManager({
   const handleLoadExample = useCallback(async (example: ExampleFile) => {
     setLoadingExample(example.name);
     try {
-      const res = await fetch(example.path);
-      if (!res.ok) throw new Error(`Failed to fetch ${example.path}`);
+      const url = `${import.meta.env.BASE_URL}${example.path.replace(/^\//, '')}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Failed to fetch ${url}`);
       const content = await res.text();
       const fileName = example.path.split('/').pop()!;
       await onFileUpload(fileName, content);
