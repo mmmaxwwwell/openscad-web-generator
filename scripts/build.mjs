@@ -54,11 +54,21 @@ async function main() {
     console.log('=== BOSL2 bundle already present, skipping ===');
   }
 
-  // Step 3: Vite build
+  // Step 3: Bundle QR library
+  const qrExists = existsSync(join(WASM_DIR, 'openscad.qr.js'));
+  if (!qrExists || forceWasm) {
+    console.log('\n=== Bundling QR Library ===');
+    const qrArgs = forceWasm ? ' --force' : '';
+    run(`node scripts/bundle-qr.mjs${qrArgs}`);
+  } else {
+    console.log('=== QR bundle already present, skipping ===');
+  }
+
+  // Step 4: Vite build
   console.log('\n=== Building with Vite ===');
   run('npx vite build');
 
-  // Step 4: Summary
+  // Step 5: Summary
   console.log('\n=== Build Complete ===');
   console.log('Output: dist/');
 }

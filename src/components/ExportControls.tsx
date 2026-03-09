@@ -11,8 +11,10 @@ interface ExportControlsProps {
   onModelGenerated?: (data: ArrayBuffer, format: OutputFormat) => void;
 }
 
+type ExportType = OutputFormat | 'multicolor-3mf';
+
 export function ExportControls({ source, params, openscad, fileName, onModelGenerated }: ExportControlsProps) {
-  const [exporting, setExporting] = useState<OutputFormat | null>(null);
+  const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
   const logRef = useRef<HTMLPreElement>(null);
@@ -54,6 +56,34 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
     }
   }, [source, params, openscad, fileName]);
 
+  const handleMulticolorExport = useCallback(async () => {
+    if (!source) return;
+
+    setExporting('multicolor-3mf');
+    setError(null);
+    setErrorLogs([]);
+    try {
+      const data = await openscad.renderMulticolor(source, params);
+      onModelGenerated?.(data, '3mf');
+      const blob = new Blob([data], { type: 'model/3mf' });
+      const url = URL.createObjectURL(blob);
+
+      const baseName = fileName.replace(/\.scad$/i, '');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}-multicolor.3mf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err instanceof Error ? err.message : 'Multi-color export failed');
+      if (err.logs) setErrorLogs(err.logs);
+    } finally {
+      setExporting(null);
+    }
+  }, [source, params, openscad, fileName]);
+
   const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
 
   return (
@@ -71,6 +101,13 @@ export function ExportControls({ source, params, openscad, fileName, onModelGene
           disabled={isDisabled || exporting !== null}
         >
           {exporting === '3mf' ? 'Exporting 3MF…' : 'Export 3MF'}
+        </button>
+        <button
+          onClick={handleMulticolorExport}
+          disabled={isDisabled || exporting !== null}
+          title="Export with per-color separation for multi-material printing"
+        >
+          {exporting === 'multicolor-3mf' ? 'Exporting Multi-Color…' : 'Export Multi-Color 3MF'}
         </button>
       </div>
       {openscad.logs.length > 0 && (

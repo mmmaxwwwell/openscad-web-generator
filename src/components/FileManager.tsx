@@ -15,6 +15,7 @@ const BUNDLED_EXAMPLES: ExampleFile[] = [
   { name: 'Hull Sailboat', path: '/examples/hull_sailboat.scad' },
   { name: 'Parametric Sign', path: '/examples/sign.scad' },
   { name: 'Candle Stand', path: '/examples/candleStand.scad' },
+  { name: 'Fi Mini Case (BOSL2 + QR)', path: '/examples/fi_mini_case.scad' },
 ];
 
 interface FileManagerProps {

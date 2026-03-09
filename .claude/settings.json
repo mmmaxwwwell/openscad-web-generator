@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/max/git/3d/fi mini holder/**)",
+      "Read(//home/max/git/3d/colorscad/**)",
+      "Read(//home/max/git/3d/**)",
+      "Read(//home/max/**)",
+      "Read(//home/max/.local/share/**)",
+      "Read(//usr/**)",
+      "Bash(locate qr.scad)",
+      "Bash(node scripts/bundle-qr.mjs)",
+      "WebSearch"
+    ],
+    "additionalDirectories": [
+      "/home/max/git/3d/fi mini holder"
+    ]
+  }
+}

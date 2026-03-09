@@ -16,6 +16,9 @@ export interface OpenSCADApi {
   /** Render scad source to STL or 3MF, returns the file bytes. */
   render(scadSource: string, format: OutputFormat, onLog?: (line: string) => void): Promise<ArrayBuffer>;
 
+  /** Render scad source to multi-color 3MF, returns the merged file bytes. */
+  renderMulticolor(scadSource: string, onLog?: (line: string) => void): Promise<ArrayBuffer>;
+
   /** Terminate the worker. */
   dispose(): void;
 }
@@ -38,8 +41,9 @@ export function injectParameters(source: string, params: Record<string, ScadValu
   const entries = Object.entries(params);
   if (entries.length === 0) return source;
 
+  // Append after source so overrides win (OpenSCAD uses last-assignment-wins)
   const lines = entries.map(([name, value]) => `${name} = ${formatScadValue(value)};`);
-  return lines.join('\n') + '\n\n' + source;
+  return source + '\n\n' + lines.join('\n') + '\n';
 }
 
 function formatScadValue(value: ScadValue): string {
@@ -130,6 +134,16 @@ export function createOpenSCADApi(): OpenSCADApi {
         id,
         scadSource,
         outputFormat: format,
+      });
+    },
+
+    async renderMulticolor(scadSource: string, onLog?: (line: string) => void) {
+      const id = nextId();
+      if (onLog) logCallbacks.set(id, onLog);
+      return send<ArrayBuffer>({
+        type: 'render-multicolor',
+        id,
+        scadSource,
       });
     },
 

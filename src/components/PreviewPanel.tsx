@@ -136,14 +136,23 @@ export function PreviewPanel({ modelData, modelFormat }: PreviewPanelProps) {
       } else {
         const loader = new ThreeMFLoader();
         group = loader.parse(modelData) as THREE.Group;
-        // Apply a default material if 3MF meshes lack one
+        // Apply default material to meshes that lack one;
+        // leave colored meshes (vertexColors) untouched.
         group.traverse((child) => {
-          if (child instanceof THREE.Mesh && !child.material) {
-            child.material = new THREE.MeshPhongMaterial({
-              color: 0x4a90d9,
-              specular: 0x222222,
-              shininess: 40,
-            });
+          if (child instanceof THREE.Mesh) {
+            const mat = child.material as THREE.MeshPhongMaterial;
+            if (!mat) {
+              child.material = new THREE.MeshPhongMaterial({
+                color: 0x4a90d9,
+                specular: 0x222222,
+                shininess: 40,
+              });
+            } else if (!mat.vertexColors && mat.color && mat.color.r === 1 && mat.color.g === 1 && mat.color.b === 1) {
+              // Default white material from loader — replace with a nicer color
+              mat.color.setHex(0x4a90d9);
+              mat.specular = new THREE.Color(0x222222);
+              mat.shininess = 40;
+            }
           }
         });
       }

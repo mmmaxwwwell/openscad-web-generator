@@ -31,6 +31,11 @@ export interface UseOpenSCADResult {
     params: Record<string, ScadValue>,
     format: OutputFormat,
   ) => Promise<ArrayBuffer>;
+  /** Render scad source to multi-color 3MF. */
+  renderMulticolor: (
+    source: string,
+    params: Record<string, ScadValue>,
+  ) => Promise<ArrayBuffer>;
 }
 
 export function useOpenSCAD(): UseOpenSCADResult {
@@ -131,5 +136,40 @@ export function useOpenSCAD(): UseOpenSCADResult {
     }
   }, [init, ensureApi, resetWorker, updateStatus]);
 
-  return { status, error, logs, init, render };
+  const renderMulticolor = useCallback(async (
+    source: string,
+    params: Record<string, ScadValue>,
+  ): Promise<ArrayBuffer> => {
+    const currentStatus = statusRef.current;
+
+    if (currentStatus === 'idle' || currentStatus === 'error') {
+      if (currentStatus === 'error') resetWorker();
+      await init();
+    }
+
+    const api = ensureApi();
+
+    updateStatus('rendering');
+    setError(null);
+    setLogs([]);
+    try {
+      const injected = injectParameters(source, params);
+      const result = await api.renderMulticolor(injected, (line) => {
+        if (mountedRef.current) setLogs((prev) => [...prev, line]);
+      });
+      if (mountedRef.current) updateStatus('ready');
+      return result;
+    } catch (err: any) {
+      console.error('[useOpenSCAD] Multicolor render failed:', err);
+      if (mountedRef.current) {
+        updateStatus('error');
+        const msg = err?.message ?? 'Multicolor render failed';
+        setError(msg);
+        if (err.logs) setLogs(err.logs);
+      }
+      throw err;
+    }
+  }, [init, ensureApi, resetWorker, updateStatus]);
+
+  return { status, error, logs, init, render, renderMulticolor };
 }
