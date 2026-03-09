@@ -157,13 +157,17 @@ export function PreviewPanel({ modelData, modelFormat }: PreviewPanelProps) {
         });
       }
 
-      // Center the model and fit to view
+      // OpenSCAD uses Z-up; Three.js uses Y-up — rotate to lay flat
+      group.rotation.x = -Math.PI / 2;
+
+      // Compute bounding box after rotation
       const box = new THREE.Box3().setFromObject(group);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
       const maxDim = Math.max(size.x, size.y, size.z);
 
-      group.position.sub(center);
+      // Center horizontally, place bottom on the grid plane (y=0)
+      group.position.set(-center.x, -box.min.y, -center.z);
       modelGroupRef.current = group;
       scene.add(group);
 
