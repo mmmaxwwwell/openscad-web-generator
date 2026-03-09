@@ -79,6 +79,27 @@ function buildSearchParams(
   return params;
 }
 
+/** Read URL params synchronously (safe to call multiple times, reads are idempotent) */
+function readInitialUrlParams() {
+  const search = new URLSearchParams(window.location.search);
+  const exampleName = search.get('example');
+  const fileName = search.get('file');
+
+  if (!exampleName && !fileName) return null;
+
+  const overrides: Record<string, string> = {};
+  for (const [key, value] of search.entries()) {
+    if (!RESERVED_PARAMS.has(key) && VALID_PARAM_NAME.test(key)) {
+      overrides[key] = value;
+    }
+  }
+
+  return { exampleName, fileName, overrides };
+}
+
+// Capture URL params once at module level, before any React rendering
+const initialUrlParams = readInitialUrlParams();
+
 function App() {
   // ─── Storage configuration ──────────────────────────────
   const [storageBackend, setStorageBackend] = useState<'browser' | 's3'>('browser');
@@ -202,49 +223,20 @@ function App() {
   }, []);
 
   // ─── URL sync: load from URL on initial mount ──────────
-  const hasLoadedFromUrl = useRef(false);
-
-  // ─── URL sync: update URL when state changes ───────────
-  const paramDefaults = useMemo(() => {
-    if (!parsedFile) return {};
-    const defaults: Record<string, ScadValue> = {};
-    for (const p of parsedFile.params) defaults[p.name] = p.default;
-    return defaults;
-  }, [parsedFile]);
+  // URL params were captured at module level (initialUrlParams) to survive StrictMode double-firing.
+  const urlLoadStarted = useRef(false);
 
   useEffect(() => {
-    // Don't overwrite the URL until we've had a chance to read it on initial load
-    if (!hasLoadedFromUrl.current) return;
+    if (!initialUrlParams || urlLoadStarted.current) return;
+    urlLoadStarted.current = true;
 
-    const search = buildSearchParams(selectedFileId, isExample, paramValues, paramDefaults);
-    const newUrl = search.toString()
-      ? `${window.location.pathname}?${search.toString()}`
-      : window.location.pathname;
-    window.history.replaceState(null, '', newUrl);
-  }, [selectedFileId, isExample, paramValues, paramDefaults]);
-  useEffect(() => {
-    if (hasLoadedFromUrl.current) return;
-    hasLoadedFromUrl.current = true;
+    const { exampleName, fileName, overrides } = initialUrlParams;
 
-    const search = new URLSearchParams(window.location.search);
-    const exampleName = search.get('example');
-    const fileName = search.get('file');
-
-    if (!exampleName && !fileName) return;
-
-    // Collect non-reserved params as overrides (only valid identifiers)
-    const overrides: Record<string, string> = {};
-    for (const [key, value] of search.entries()) {
-      if (!RESERVED_PARAMS.has(key) && VALID_PARAM_NAME.test(key)) {
-        overrides[key] = value;
-      }
-    }
     if (Object.keys(overrides).length > 0) {
       pendingUrlParamsRef.current = overrides;
     }
 
     if (exampleName) {
-      // Fetch the example file
       const url = `${import.meta.env.BASE_URL}examples/${exampleName}`;
       fetch(url)
         .then((res) => {
@@ -261,6 +253,25 @@ function App() {
       handleFileSelect(fileName);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── URL sync: update URL when state changes ───────────
+  const paramDefaults = useMemo(() => {
+    if (!parsedFile) return {};
+    const defaults: Record<string, ScadValue> = {};
+    for (const p of parsedFile.params) defaults[p.name] = p.default;
+    return defaults;
+  }, [parsedFile]);
+
+  useEffect(() => {
+    // Don't overwrite URL until the initial load has been processed
+    if (initialUrlParams && !selectedFileId) return;
+
+    const search = buildSearchParams(selectedFileId, isExample, paramValues, paramDefaults);
+    const newUrl = search.toString()
+      ? `${window.location.pathname}?${search.toString()}`
+      : window.location.pathname;
+    window.history.replaceState(null, '', newUrl);
+  }, [selectedFileId, isExample, paramValues, paramDefaults]);
 
   // ─── Parameter set application ─────────────────────────
   const handleApplyParamSet = useCallback((values: Record<string, ScadValue>) => {

@@ -4,3 +4,4 @@ public/wasm/
 .openscad-wasm-src/
 result
 *.tsbuildinfo
+.claude/
