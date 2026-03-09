@@ -201,6 +201,9 @@ function App() {
     setParamValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
+  // ─── URL sync: load from URL on initial mount ──────────
+  const hasLoadedFromUrl = useRef(false);
+
   // ─── URL sync: update URL when state changes ───────────
   const paramDefaults = useMemo(() => {
     if (!parsedFile) return {};
@@ -210,15 +213,15 @@ function App() {
   }, [parsedFile]);
 
   useEffect(() => {
+    // Don't overwrite the URL until we've had a chance to read it on initial load
+    if (!hasLoadedFromUrl.current) return;
+
     const search = buildSearchParams(selectedFileId, isExample, paramValues, paramDefaults);
     const newUrl = search.toString()
       ? `${window.location.pathname}?${search.toString()}`
       : window.location.pathname;
     window.history.replaceState(null, '', newUrl);
   }, [selectedFileId, isExample, paramValues, paramDefaults]);
-
-  // ─── URL sync: load from URL on initial mount ──────────
-  const hasLoadedFromUrl = useRef(false);
   useEffect(() => {
     if (hasLoadedFromUrl.current) return;
     hasLoadedFromUrl.current = true;
