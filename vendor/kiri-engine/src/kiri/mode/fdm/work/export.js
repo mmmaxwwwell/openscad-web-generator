@@ -601,7 +601,16 @@ export function fdm_export(print, online, ondone, ondebug) {
 
             speedMMM = (speed || process.outputFeedrate) * 60; // range
             if (!isBelt) {
-                fanSpeed = out.fan ?? fanSpeed;
+                if (out.fan != null) {
+                    // Respect outputFanLayer: before the fan activation layer,
+                    // clamp any per-segment fan overrides (e.g. bridge) to the
+                    // first-layer fan speed base to avoid premature fan activation.
+                    let fanLayer = process.outputFanLayer ?? 1;
+                    fanSpeed = layer < fanLayer
+                        ? Math.min(out.fan, fanSpeedBase)
+                        : out.fan;
+                }
+                subst.fan_speed = fanSpeed;
             }
 
             // hint to controller that we're working on a specific object

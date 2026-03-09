@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Printer } from '../hooks/usePrinters';
 import type { FilamentProfile } from '../hooks/useFilaments';
 import { useExtruderFilaments } from '../hooks/useExtruderFilaments';
-import { usePrinterFilamentOverrides, type PrinterFilamentOverride, type ResolvedFilamentSettings } from '../hooks/usePrinterFilamentOverrides';
+import { usePrinterFilamentOverrides, type PrinterFilamentOverride } from '../hooks/usePrinterFilamentOverrides';
 import { startPrint, type PrinterConfig } from '../lib/moonraker-api';
 import type { SliceProgress, SliceResult } from '../hooks/useSlicer';
 import type { ColorGroup } from '../lib/merge-3mf';
@@ -11,20 +11,11 @@ import type { MultiColorMesh } from '../lib/kiri-engine';
 import type { PrintProfile } from '../types/print-profile';
 import { DEFAULT_PRINT_PROFILE } from '../types/print-profile';
 import { getPrinterProfile, getNozzleProfile } from '../data/printer-profiles';
+import { buildProcessSettings, buildDeviceSettings, type PrinterSettings } from '../lib/slicer-settings';
 
 // Re-export for any external consumers
 export type { PrintProfile } from '../types/print-profile';
 
-/** Printer-owned settings (from Moonraker, overridable in dialog) */
-interface PrinterSettings {
-  bedWidth: number;
-  bedDepth: number;
-  maxHeight: number;
-  originCenter: boolean;
-  startGcode: string;
-  endGcode: string;
-  toolChangeGcode: string;
-}
 
 const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   bedWidth: 235,
@@ -143,128 +134,6 @@ interface PrintDialogProps {
 
 type DialogPhase = 'configure' | 'slicing' | 'done' | 'error';
 
-/** Build Kiri:Moto process settings from PrintProfile + resolved filament */
-function buildProcessSettings(
-  p: PrintProfile,
-  f: ResolvedFilamentSettings,
-): Record<string, unknown> {
-  return {
-    sliceHeight: p.layerHeight,
-    firstSliceHeight: p.firstLayerHeight,
-    sliceLineWidth: p.lineWidth,
-    sliceShells: p.shellCount,
-    sliceTopLayers: p.topLayers,
-    sliceBottomLayers: p.bottomLayers,
-    sliceShellOrder: p.shellOrder,
-    sliceFillSparse: p.infillDensity,
-    sliceFillType: p.infillPattern,
-    sliceFillAngle: p.infillAngle,
-    sliceFillOverlap: p.infillOverlap,
-    outputFeedrate: f.printSpeed,
-    outputFinishrate: p.outerWallSpeed,
-    outputSeekrate: p.travelSpeed,
-    firstLayerRate: p.firstLayerSpeed,
-    firstLayerFillRate: p.firstLayerFillSpeed,
-    outputTemp: f.nozzleTemp,
-    outputBedTemp: f.bedTemp,
-    firstLayerNozzleTemp: f.firstLayerNozzleTemp,
-    firstLayerBedTemp: f.firstLayerBedTemp,
-    outputMinSpeed: f.minSpeed,
-    outputMinLayerTime: f.minLayerTime,
-    sliceSupportEnable: p.supportEnabled,
-    sliceSupportAngle: p.supportAngle,
-    sliceSupportDensity: p.supportDensity,
-    sliceSupportOffset: p.supportXYOffset,
-    sliceSupportGap: p.supportZGap,
-    sliceSkirtCount: p.adhesionType === 'skirt' ? p.skirtCount : 0,
-    firstLayerBrim: p.adhesionType === 'brim' ? p.brimWidth : 0,
-    outputRaft: p.adhesionType === 'raft',
-    outputFanSpeed: Math.round(f.fanSpeed * 2.55), // 0-100 → 0-255
-    firstLayerFanSpeed: Math.round(f.firstLayerFan * 2.55),
-    outputRetractDist: f.retractDist,
-    outputRetractSpeed: f.retractSpeed,
-    outputCoastDist: p.coastDist,
-    outputRetractWipe: p.wipeDistance,
-    outputLayerRetract: p.retractOnLayerChange,
-    zHopDistance: p.zHopHeight,
-    fdmArcEnabled: p.arcEnabled,
-    outputShellMult: 1.0,
-    outputFillMult: 1.0,
-    outputSparseMult: 1.0,
-  };
-}
-
-/**
- * Replace common PrusaSlicer/OrcaSlicer variable syntax with Kiri:Moto equivalents.
- * e.g. {first_layer_bed_temperature[0]} → {bed_temp}
- */
-function migrateGcodeVars(gcode: string): string {
-  return gcode
-    .replace(/\{first_layer_bed_temperature\[\d+\]\}/g, '{bed_temp}')
-    .replace(/\{first_layer_temperature\[\d+\]\}/g, '{temp}')
-    .replace(/\{bed_temperature\[\d+\]\}/g, '{bed_temp}')
-    .replace(/\{temperature\[\d+\]\}/g, '{temp}');
-}
-
-/** Build Kiri:Moto device settings from printer config */
-function buildDeviceSettings(
-  pc: PrinterConfig | null,
-  ps: PrinterSettings,
-  extruderCount: number,
-  getFilamentForExtruder?: (index: number, filaments: FilamentProfile[]) => FilamentProfile,
-  filaments?: FilamentProfile[],
-): Record<string, unknown> {
-  const device: Record<string, unknown> = {};
-  device.bedWidth = ps.bedWidth;
-  device.bedDepth = ps.bedDepth;
-  device.maxHeight = ps.maxHeight;
-  device.originCenter = ps.originCenter;
-  if (pc) {
-    device.bedRound = pc.bedCircular;
-  }
-  if (ps.startGcode) {
-    device.gcodePre = migrateGcodeVars(ps.startGcode).split('\n').filter((l) => l.trim());
-  }
-  if (ps.endGcode) {
-    device.gcodePost = migrateGcodeVars(ps.endGcode).split('\n').filter((l) => l.trim());
-  }
-  if (ps.toolChangeGcode) {
-    device.gcodeChange = ps.toolChangeGcode.split('\n').filter((l) => l.trim());
-  }
-  // Fan control gcode — Kiri doesn't emit M106/M107 without this
-  device.gcodeFan = ['M106 S{fan_speed}'];
-  // Layer change comment
-  device.gcodeLayer = [';LAYER:{layer}'];
-  const nozzle = pc?.nozzleDiameter ?? 0.4;
-  const filament = pc?.filamentDiameter ?? 1.75;
-  if (extruderCount > 1 && getFilamentForExtruder && filaments) {
-    const extruders: Record<string, unknown>[] = [];
-    for (let i = 0; i < extruderCount; i++) {
-      const fil = getFilamentForExtruder(i, filaments);
-      extruders.push({
-        extNozzle: nozzle,
-        extFilament: filament,
-        extOffsetX: 0,
-        extOffsetY: 0,
-        extSelect: [`T${i}`],
-        extDeselect: [],
-        extTemp: fil.nozzleTemp,
-      });
-    }
-    device.extruders = extruders;
-  } else {
-    device.extruders = [{
-      extNozzle: nozzle,
-      extFilament: filament,
-      extOffsetX: 0,
-      extOffsetY: 0,
-      extSelect: ['T0'],
-      extDeselect: [],
-    }];
-  }
-  return device;
-}
-
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -344,7 +213,6 @@ export function PrintDialog({
   );
   const [sliceResult, setSliceResult] = useState<SliceResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
   const [startingPrint, setStartingPrint] = useState(false);
   const [activeSection, setActiveSection] = useState<string>(
     hasMulticolor ? 'extruders' : 'quality',
@@ -424,7 +292,7 @@ export function PrintDialog({
     return isFieldOverridden(printer.address, primaryFilament.id, field);
   }, [isFieldOverridden, printer.address, primaryFilament.id]);
 
-  const handleSliceAndSend = useCallback(async () => {
+  const handleSlice = useCallback(async () => {
     setPhase('slicing');
     setUploadError(null);
     try {
@@ -463,19 +331,12 @@ export function PrintDialog({
 
       const result = await onSlice(stlData, processSettings, deviceSettings, tools, multiColorMeshes);
       setSliceResult(result);
-
-      // Upload gcode
-      setUploading(true);
-      const gcodeFileName = fileName.replace(/\.(stl|3mf|scad)$/i, '') + '.gcode';
-      await onUploadGcode(result.gcode, gcodeFileName);
-      setUploading(false);
       setPhase('done');
-      onToast?.(`Sent "${gcodeFileName}" to ${printer.name}`);
     } catch (err) {
       setPhase('error');
       setUploadError(err instanceof Error ? err.message : String(err));
     }
-  }, [profile, resolved, printerConfig, printerSettings, stlData, fileName, onSlice, onUploadGcode, printer.name, printer.address, onToast, extruderCount, getFilamentForExtruder, filaments, hasMulticolor, threeMfData, extruderAssignments]);
+  }, [profile, resolved, printerConfig, printerSettings, stlData, fileName, onSlice, printer.address, extruderCount, getFilamentForExtruder, filaments, hasMulticolor, threeMfData, extruderAssignments]);
 
   const gcodeFileName = useMemo(
     () => fileName.replace(/\.(stl|3mf|scad)$/i, '') + '.gcode',
@@ -980,10 +841,10 @@ export function PrintDialog({
             {/* Slice & Send button */}
             <button
               className="print-dialog-slice-btn"
-              onClick={handleSliceAndSend}
+              onClick={handleSlice}
               disabled={slicerStatus === 'loading' || slicerStatus === 'slicing'}
             >
-              Slice &amp; Send to {printer.name}
+              Slice
             </button>
           </>
         )}
@@ -993,12 +854,12 @@ export function PrintDialog({
             <p className="print-dialog-progress-label">
               {slicerProgress
                 ? `${slicerProgress.stage}${slicerProgress.message ? ` (${slicerProgress.message})` : ''}... ${progressPercent(slicerProgress)}%`
-                : uploading ? 'Uploading gcode...' : 'Initializing slicer...'}
+                : 'Initializing slicer...'}
             </p>
             <div className="print-dialog-progress-bar">
               <div
                 className="print-dialog-progress-fill"
-                style={{ width: `${slicerProgress ? progressPercent(slicerProgress) : uploading ? 95 : 0}%` }}
+                style={{ width: `${slicerProgress ? progressPercent(slicerProgress) : 0}%` }}
               />
             </div>
             {slicerProgress && (
@@ -1016,8 +877,13 @@ export function PrintDialog({
 
         {phase === 'done' && sliceResult && (
           <div className="print-dialog-done">
+            {uploadError && (
+              <p className="print-dialog-upload-warning" style={{ color: '#f0ad4e', marginBottom: '0.5rem' }}>
+                {uploadError}
+              </p>
+            )}
             <p className="print-dialog-success">
-              Uploaded {gcodeFileName} to {printer.name}
+              Slicing complete
             </p>
             {sliceResult.printTime && (
               <p>Estimated print time: {formatTime(sliceResult.printTime)}</p>
@@ -1031,30 +897,34 @@ export function PrintDialog({
                 disabled={startingPrint}
                 onClick={async () => {
                   setStartingPrint(true);
+                  setUploadError(null);
                   try {
+                    await onUploadGcode(sliceResult.gcode, gcodeFileName);
                     await startPrint(printer.address, gcodeFileName);
                     onToast?.(`Started printing ${gcodeFileName} on ${printer.name}`);
                     onClose();
                   } catch (err) {
                     setUploadError(err instanceof Error ? err.message : String(err));
-                    setPhase('error');
                   } finally {
                     setStartingPrint(false);
                   }
                 }}
               >
-                {startingPrint ? 'Starting...' : 'Start Print'}
+                {startingPrint ? 'Sending...' : `Print on ${printer.name}`}
               </button>
               <button
                 className="print-dialog-download-btn"
                 onClick={() => {
-                  const blob = new Blob([sliceResult.gcode], { type: 'text/plain' });
+                  const blob = new Blob([sliceResult.gcode], { type: 'application/octet-stream' });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
                   a.download = gcodeFileName;
+                  document.body.appendChild(a);
                   a.click();
-                  URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                  // Delay revoke to give Android time to start the download
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
                 }}
               >
                 Download GCode
