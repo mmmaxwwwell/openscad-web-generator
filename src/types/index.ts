@@ -1,5 +1,5 @@
 // Supported parameter value types
-export type ScadParamType = 'number' | 'string' | 'boolean' | 'vector' | 'enum';
+export type ScadParamType = 'number' | 'string' | 'text' | 'boolean' | 'vector' | 'enum';
 
 // A single parsed parameter from the PARAMS section
 export interface ScadParam {

@@ -295,8 +295,16 @@ input:focus, select:focus {
 
 .param-input input[type="number"],
 .param-input input[type="text"],
-.param-input select {
+.param-input select,
+.param-input .param-textarea {
   width: 100%;
+}
+
+.param-input .param-textarea {
+  resize: vertical;
+  font-family: inherit;
+  font-size: inherit;
+  min-height: 4em;
 }
 
 .param-input input[type="checkbox"] {

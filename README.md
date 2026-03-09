@@ -27,7 +27,7 @@ Add a description block to your file to display a summary on the editor page:
 ```scad
 // BEGIN_DESCRIPTION
 // A protective case for the Fi Mini GPS tracker.
-// Held together by 6 M3x6 socket head cap screws.
+// Held together by 6 M3x6 SHCS (socket head cap screws).
 // END_DESCRIPTION
 ```
 
@@ -62,6 +62,11 @@ vent_shape = "circle"; // [circle, square, hexagon]
 
 // Outer dimensions as [x, y, z].
 outer_dims = [50, 40, 30];
+
+
+// Multiline text for a QR code or label. // multiline
+// Supports multiple lines of input.
+info_text = "";
 // END_PARAMS
 ```
 
@@ -71,11 +76,14 @@ outer_dims = [50, 40, 30];
 |------|---------|------------|
 | Number | `width = 50;` | Text input |
 | String | `label = "My Box";` | Text input |
+| Multiline text | `info = ""; // multiline` | Textarea |
 | Boolean | `vents = true;` | Checkbox |
 | Vector | `outer_dims = [50, 40, 30];` | Multiple number inputs |
 | Enum | `shape = "circle"; // [circle, square, hexagon]` | Dropdown |
 
 For **enum** parameters, add an inline comment with a bracketed comma-separated list of options after the assignment.
+
+For **multiline text** parameters, add `// multiline` at the end of the first help comment line. This renders a textarea in the UI instead of a single-line text input. Newlines are encoded as `\n` in the OpenSCAD string.
 
 ### Parameter Sets
 
@@ -108,7 +116,7 @@ The app syncs state to URL search parameters so you can share direct links:
 - `?example=sign.scad` — load a bundled example
 - `?example=sign.scad&text=Hello&height=30` — load with parameter overrides
 - `?file=myfile.scad` — load a file from the user's browser storage
-- [`?example=fi_mini_case.scad&qr_code_url=https://www.youtube.com/watch?v=dQw4w9WgXcQ`](https://mmmaxwwwell.github.io/openscad-web-generator/?example=fi_mini_case.scad&qr_code_url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ) — Fi Mini case with a QR code
+- [`?example=fi_mini_case.scad&qr_code_text=https://www.youtube.com/watch?v=dQw4w9WgXcQ`](https://mmmaxwwwell.github.io/openscad-web-generator/?example=fi_mini_case.scad&qr_code_text=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3DdQw4w9WgXcQ) — Fi Mini case with a QR code
 
 Only parameters that differ from their defaults are included in the URL. Parameter values are type-checked against the file's parameter definitions (numbers, booleans, vectors, enums).
 

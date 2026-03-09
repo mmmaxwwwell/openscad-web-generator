@@ -52,7 +52,7 @@ export function injectParameters(source: string, params: Record<string, ScadValu
 function formatScadValue(value: ScadValue): string {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'string') return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (typeof value === 'string') return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')}"`;
   if (Array.isArray(value)) return `[${value.join(', ')}]`;
   return String(value);
 }

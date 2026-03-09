@@ -104,13 +104,25 @@ export function parseParams(source: string): ScadParam[] {
 
     // Collect help text from preceding comment lines
     const helpLines: string[] = [];
+    let isMultiline = false;
     for (let i = 0; i < lines.length - 1; i++) {
       const line = lines[i];
       if (line.startsWith('//')) {
-        helpLines.push(line.replace(/^\/\/\s?/, ''));
+        let commentText = line.replace(/^\/\/\s?/, '');
+        // Check for multiline flag in comment
+        if (commentText.includes('// multiline')) {
+          isMultiline = true;
+          commentText = commentText.replace(/\s*\/\/\s*multiline\s*/, '').trim();
+        }
+        if (commentText) helpLines.push(commentText);
       }
     }
     const help = helpLines.join(' ');
+
+    // Override type to 'text' for multiline string params
+    if (isMultiline && (type === 'string')) {
+      type = 'text';
+    }
 
     params.push({ name, type, default: value, help, ...(options ? { options } : {}) });
   }

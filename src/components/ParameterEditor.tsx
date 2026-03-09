@@ -56,6 +56,8 @@ function ParamField({ param, value, onChange }: ParamFieldProps) {
           <VectorInput value={value as number[]} onChange={handleChange} />
         ) : param.type === 'number' ? (
           <NumberInput value={value as number} onChange={handleChange} />
+        ) : param.type === 'text' ? (
+          <TextareaInput value={value as string} onChange={handleChange} />
         ) : (
           <StringInput value={value as string} onChange={handleChange} />
         )}
@@ -103,6 +105,17 @@ function StringInput({ value, onChange }: { value: string; onChange: (v: ScadVal
     <input
       type="text"
       value={value}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+}
+
+function TextareaInput({ value, onChange }: { value: string; onChange: (v: ScadValue) => void }) {
+  return (
+    <textarea
+      className="param-textarea"
+      value={value}
+      rows={4}
       onChange={(e) => onChange(e.target.value)}
     />
   );

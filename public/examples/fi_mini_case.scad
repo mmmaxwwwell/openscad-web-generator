@@ -3,14 +3,20 @@ include <qr.scad>
 
 // BEGIN_DESCRIPTION
 // A protective case for the Fi Mini GPS tracker.
-// Held together by 6 M3x6 socket head cap screws.
-// Supports having a QR code on the top so you can include your contact info if the tracker is found.
+// Held together by 6 M3x6 SHCS (socket head cap screws).
+// Supports an optional QR code on the top surface — enter your phone number,
+// home address, emergency contact, vet info, or care instructions so anyone
+// who finds your dog can scan the code and reach you.
 // END_DESCRIPTION
 
 // BEGIN_PARAMS
-// URL for the QR code on top of the case.
+// Text to encode in the QR code on top of the case. // multiline
+// You can include multiple lines: phone number, address,
+// pet name, special care instructions, etc.
+// Keep it short — more text means smaller QR modules,
+// which may exceed your printer's resolution.
 // Leave empty for no QR code.
-qr_code_url = "";
+qr_code_text = "";
 // END_PARAMS
 
 qr_thickness = 1;  // mm - thickness of QR code modules
@@ -382,7 +388,7 @@ qr_size = 25;  // mm - QR code fits within the top surface
 
 module qr_code() {
     translate([0, 0, case_z_top - qr_thickness + 0.01])
-        qr(qr_code_url,
+        qr(qr_code_text,
            width = qr_size, height = qr_size, thickness = qr_thickness, center = true);
 }
 
@@ -402,7 +408,7 @@ split_z = -fi_height / 2;
 // Top half — body (black), with QR code subtracted if a URL is provided
 translate([0, 0, fi_height / 2])
     color("black")
-        if (qr_code_url != "") {
+        if (qr_code_text != "") {
             difference() {
                 top_half();
                 qr_code();
@@ -412,7 +418,7 @@ translate([0, 0, fi_height / 2])
         }
 
 // QR code (white), only the part that intersects the top half
-if (qr_code_url != "")
+if (qr_code_text != "")
     translate([0, 0, fi_height / 2])
         color("white")
             intersection() {
