@@ -1,8 +1,18 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js';
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+/** Add inverted-color edge lines to a mesh for visibility on dark surfaces */
+function addEdgeLines(mesh: THREE.Mesh, faceColor: THREE.Color) {
+  const edges = new THREE.EdgesGeometry(mesh.geometry, 30);
+  const inverted = new THREE.Color(1 - faceColor.r, 1 - faceColor.g, 1 - faceColor.b);
+  const lineMat = new THREE.LineBasicMaterial({ color: inverted, transparent: true, opacity: 0.35 });
+  const lines = new THREE.LineSegments(edges, lineMat);
+  mesh.add(lines);
+}
 
 interface PreviewPanelProps {
   /** Raw ArrayBuffer of STL or 3MF data, or null when nothing has been rendered yet. */
@@ -133,6 +143,7 @@ export function PreviewPanel({ modelData, modelFormat }: PreviewPanelProps) {
         const mesh = new THREE.Mesh(geometry, material);
         group = new THREE.Group();
         group.add(mesh);
+        addEdgeLines(mesh, material.color);
       } else {
         const loader = new ThreeMFLoader();
         group = loader.parse(modelData) as THREE.Group;
@@ -147,11 +158,22 @@ export function PreviewPanel({ modelData, modelFormat }: PreviewPanelProps) {
                 specular: 0x222222,
                 shininess: 40,
               });
-            } else if (!mat.vertexColors && mat.color && mat.color.r === 1 && mat.color.g === 1 && mat.color.b === 1) {
-              // Default white material from loader — replace with a nicer color
+              addEdgeLines(child, new THREE.Color(0x4a90d9));
+            } else if (mat.vertexColors) {
+              // Colorgroup-based mesh — vertex colors encode the actual color.
+              // Add specular + shininess for better visibility, especially for
+              // white/light colors that otherwise blend into the background.
+              mat.specular = new THREE.Color(0x222222);
+              mat.shininess = 40;
+              addEdgeLines(child, mat.color || new THREE.Color(0x808080));
+            } else if (mat.name === THREE.Loader.DEFAULT_MATERIAL_NAME) {
+              // Default white material from loader (no colorgroup) — replace with a nicer color
               mat.color.setHex(0x4a90d9);
               mat.specular = new THREE.Color(0x222222);
               mat.shininess = 40;
+              addEdgeLines(child, mat.color);
+            } else {
+              addEdgeLines(child, mat.color || new THREE.Color(0x808080));
             }
           }
         });

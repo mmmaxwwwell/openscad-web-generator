@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { useState, useCallback, useEffect, useRef } from 'react';
 import type { StorageAdapter, FileInfo } from '../types';
 import { createStorage, type StorageConfig } from '../lib/storage';

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useState } from 'react';
 import type { Printer } from '../hooks/usePrinters';
 import { PRINTER_PROFILES } from '../data/printer-profiles';

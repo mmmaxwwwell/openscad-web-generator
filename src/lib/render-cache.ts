@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { openDB, type IDBPDatabase } from 'idb';
 import type { ScadValue } from '../types';
 
@@ -26,7 +27,7 @@ function getDb(): Promise<IDBPDatabase> {
   });
 }
 
-function canonicalize(obj: Record<string, ScadValue>): string {
+export function canonicalize(obj: Record<string, ScadValue>): string {
   const sorted: Record<string, ScadValue> = {};
   for (const key of Object.keys(obj).sort()) {
     sorted[key] = obj[key];

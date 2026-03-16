@@ -2,7 +2,7 @@
 
 **Try it live:** https://mmmaxwwwell.github.io/openscad-web-generator/
 
-A browser-based parameter editor and renderer for [OpenSCAD](https://openscad.org/) files. Upload `.scad` files, tweak parameters with a GUI, preview the 3D model, and export to STL or multi-color 3MF — all running client-side via OpenSCAD compiled to WebAssembly.
+A browser-based parameter editor, renderer, and slicer for [OpenSCAD](https://openscad.org/) files. Upload `.scad` files, tweak parameters with a GUI, preview the 3D model, export to STL or multi-color 3MF, and slice for 3D printing — all running client-side via OpenSCAD and [libslic3r](https://github.com/prusa3d/PrusaSlicer) (PrusaSlicer) compiled to WebAssembly.
 
 ## Features
 
@@ -14,7 +14,8 @@ A browser-based parameter editor and renderer for [OpenSCAD](https://openscad.or
 - **Shareable URLs** — the current file and parameter values are synced to the URL, so you can share direct links like `?example=sign.scad&height=30`
 - **File descriptions** — `.scad` files can include a `BEGIN_DESCRIPTION` block that is displayed on the editor page
 - **Storage backends** — files stored in browser (IndexedDB) or on S3-compatible storage
-- **Fully client-side** — OpenSCAD runs as WASM in a web worker, no server required
+- **Built-in slicer** — slice models for 3D printing using libslic3r (PrusaSlicer engine) compiled to WASM, with GCode preview and direct send to Klipper/Moonraker printers
+- **Fully client-side** — OpenSCAD and the slicer both run as WASM in web workers, no server required
 
 ## Writing `.scad` Files for This Tool
 
@@ -201,7 +202,46 @@ To enable APK signing in CI, add these repository secrets:
 ## Development
 
 ```bash
+nix develop              # enter dev shell (or use your own Node 22 setup)
 npm install
-npm run build:wasm   # download OpenSCAD WASM artifacts
-npm run dev          # start dev server
+npm run build:wasm       # download OpenSCAD WASM from GitHub releases
+npm run dev              # start dev server
+npm test                 # run tests
 ```
+
+### Building WASM from Source
+
+Both WASM modules are built via Nix flake derivations. Pre-built artifacts are downloaded from GitHub releases by default.
+
+**OpenSCAD WASM** (required):
+```bash
+npm run build:wasm              # download pre-built (~fast)
+npm run build:wasm:source       # build from source via Nix (~90 min)
+```
+
+**Slicer WASM** (optional — enables slicing in PrintDialog):
+```bash
+node scripts/download-slicer-wasm.mjs   # download pre-built (if release exists)
+nix build .#libslic3r-wasm              # build from source (~50-85 min first time)
+node scripts/build-slicer-wasm.mjs      # copy Nix output to public/wasm/
+```
+
+The slicer build compiles PrusaSlicer's libslic3r (v2.9.4) plus 16 dependencies (Boost, TBB, GMP, CGAL, etc.) to WASM via emscripten. First build downloads all sources and takes ~50-85 minutes. Subsequent builds are faster because Nix caches the deps derivation in `/nix/store/`.
+
+**Build flags** for `scripts/build.mjs`:
+- `--build-slicer` — build slicer WASM from source via Nix
+- `--skip-slicer` — skip slicer WASM entirely
+- `--force-wasm` — force re-download/rebuild of all WASM artifacts
+
+**System requirements** for building from source:
+- Nix with flakes enabled
+- 8 GB RAM minimum (16 GB recommended)
+- ~5-10 GB disk in `/tmp` during build
+
+## License
+
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-or-later).
+
+This license is required because the project incorporates [libslic3r](https://github.com/prusa3d/PrusaSlicer) from PrusaSlicer and [LibBGCode](https://github.com/prusa3d/libbgcode), both of which are licensed under AGPL-3.0. If you use this software over a network (e.g., as a hosted web application), you must make the complete source code available to users of that service under the same license.
+
+See the [LICENSE](LICENSE) file for the full license text.

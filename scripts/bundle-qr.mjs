@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
  * Bundles the qr.scad library into a JS module that can be loaded by the OpenSCAD WASM worker.

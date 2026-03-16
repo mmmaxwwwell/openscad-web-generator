@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ScadParam, ScadParamSet, ScadValue } from './types';
 import type { S3Config, StorageConfig } from './lib/storage';
@@ -22,6 +23,7 @@ import { uploadToMoonraker } from './components/SendToPrinter';
 import type { Printer } from './hooks/usePrinters';
 import type { OutputFormat } from './lib/openscad-api';
 import type { ColorGroup } from './lib/merge-3mf';
+import { parseSlicerSettings } from './lib/scad-parser';
 
 const paramSetStorage = new BrowserParamSetStorage();
 
@@ -209,6 +211,10 @@ function App() {
 
   // ─── Scad file parsing ─────────────────────────────────
   const parsedFile = useScadParser(fileSource);
+  const scadSlicerSettings = useMemo(
+    () => fileSource ? parseSlicerSettings(fileSource) : {},
+    [fileSource],
+  );
 
   // ─── Parameter values (editable state) ──────────────────
   const [paramValues, setParamValues] = useState<Record<string, ScadValue>>({});
@@ -355,12 +361,10 @@ function App() {
 
   const handleSlice = useCallback(async (
     stlData: ArrayBuffer,
-    processSettings: Record<string, unknown>,
-    deviceSettings: Record<string, unknown>,
-    tools?: unknown[],
-    multiColorMeshes?: import('./lib/kiri-engine').MultiColorMesh[],
+    config: Record<string, string>,
+    threeMfData?: ArrayBuffer,
   ) => {
-    return slicer.slice(stlData, processSettings, deviceSettings, tools, multiColorMeshes);
+    return slicer.slice(stlData, config, threeMfData);
   }, [slicer]);
 
   const handleUploadGcode = useCallback(async (gcode: string, gcodeFileName: string) => {
@@ -406,6 +410,22 @@ function App() {
     return () => {
       delete (window as unknown as Record<string, unknown>).__onAndroidBack;
     };
+  }, [printDialogState, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles]);
+
+  // ─── Escape key handling (mirrors Android back button) ──
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // PrintDialog handles its own Escape internally
+      if (printDialogState) return;
+      if (showPrinterSettings) {
+        setShowPrinterSettings(false);
+      } else if (selectedFileId && fileSource) {
+        handleBackToFiles();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [printDialogState, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles]);
 
   // ─── GitHub corner ─────────────────────────────────────
@@ -626,9 +646,11 @@ function App() {
           slicerProgress={slicer.progress}
           slicerError={slicer.error}
           slicerDebugLog={slicer.debugLog}
+          onCancelSlice={slicer.cancel}
           onUploadGcode={handleUploadGcode}
-          onClose={() => setPrintDialogState(null)}
+          onClose={() => { slicer.cancel(); setPrintDialogState(null); }}
           onToast={setToastMessage}
+          scadSlicerSettings={scadSlicerSettings}
         />
       )}
       <Toast message={toastMessage} onDismiss={handleDismissToast} />

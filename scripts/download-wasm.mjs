@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
  * Downloads OpenSCAD WASM release artifacts from GitHub into public/wasm/.

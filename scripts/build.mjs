@@ -1,14 +1,16 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
  * Build orchestration script.
  * 1. Downloads OpenSCAD WASM if not present (or --force-wasm)
- * 2. Runs vite build
- * 3. Prints build summary
+ * 2. Downloads/builds libslic3r WASM if not present (or --force-wasm)
+ * 3. Runs vite build
+ * 4. Prints build summary
  */
 
 import { execSync } from 'child_process';
-import { existsSync, copyFileSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -25,6 +27,8 @@ async function main() {
   const forceWasm = process.argv.includes('--force-wasm');
   const skipWasm = process.argv.includes('--skip-wasm');
   const buildWasm = process.argv.includes('--build-wasm');
+  const skipSlicer = process.argv.includes('--skip-slicer');
+  const buildSlicer = process.argv.includes('--build-slicer');
 
   // Step 1: Download or build WASM if needed
   if (skipWasm) {
@@ -44,7 +48,25 @@ async function main() {
     }
   }
 
-  // Step 2: Bundle BOSL2 library
+  // Step 2: Download or build libslic3r WASM if needed
+  if (skipSlicer) {
+    console.log('=== Skipping slicer WASM (--skip-slicer) ===');
+  } else if (buildSlicer) {
+    console.log('=== Building libslic3r WASM from source ===');
+    const args = forceWasm ? ' --force' : '';
+    run(`node scripts/build-slicer-wasm.mjs${args}`);
+  } else {
+    const slicerExists = existsSync(join(WASM_DIR, 'libslic3r.wasm'));
+    if (!slicerExists || forceWasm) {
+      console.log('=== Downloading libslic3r WASM ===');
+      const args = forceWasm ? ' --force' : '';
+      run(`node scripts/download-slicer-wasm.mjs${args}`);
+    } else {
+      console.log('=== libslic3r WASM already present, skipping download ===');
+    }
+  }
+
+  // Step 3: Bundle BOSL2 library
   const bosl2Exists = existsSync(join(WASM_DIR, 'openscad.bosl2.js'));
   if (!bosl2Exists || forceWasm) {
     console.log('\n=== Bundling BOSL2 Library ===');
@@ -54,7 +76,7 @@ async function main() {
     console.log('=== BOSL2 bundle already present, skipping ===');
   }
 
-  // Step 3: Bundle QR library
+  // Step 4: Bundle QR library
   const qrExists = existsSync(join(WASM_DIR, 'openscad.qr.js'));
   if (!qrExists || forceWasm) {
     console.log('\n=== Bundling QR Library ===');
@@ -62,17 +84,6 @@ async function main() {
     run(`node scripts/bundle-qr.mjs${qrArgs}`);
   } else {
     console.log('=== QR bundle already present, skipping ===');
-  }
-
-  // Step 4: Copy Kiri:Moto slicer WASM
-  const kiriWasmSrc = join(ROOT, 'vendor', 'kiri-engine', 'src', 'wasm', 'kiri-geo.wasm');
-  const kiriWasmDest = join(WASM_DIR, 'kiri-geo.wasm');
-  if (existsSync(kiriWasmSrc)) {
-    mkdirSync(WASM_DIR, { recursive: true });
-    copyFileSync(kiriWasmSrc, kiriWasmDest);
-    console.log('=== Copied kiri-geo.wasm to public/wasm/ ===');
-  } else {
-    console.warn('Warning: kiri-geo.wasm not found in vendor/kiri-engine/. Slicer will not work.');
   }
 
   // Step 5: Vite build

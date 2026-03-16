@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { describe, it, expect } from 'vitest';
 import {
   merge3mf,
@@ -193,6 +194,128 @@ describe('merge-3mf', () => {
     it('returns empty for garbage data', () => {
       const garbage = new Uint8Array([1, 2, 3, 4]);
       expect(extractColorMeshes(garbage.buffer as ArrayBuffer)).toHaveLength(0);
+    });
+
+    it('handles ASCII STL input', () => {
+      const asciiSTL = new TextEncoder().encode(
+        `solid test
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 10 0 0
+    vertex 5 10 0
+  endloop
+endfacet
+endsolid test`
+      );
+      const inputs: ColoredModel[] = [
+        { color: [1, 0, 0, 1], data: asciiSTL },
+        { color: [0, 0, 1, 1], data: makeTriangleSTL([0, 0, 5], [10, 0, 5], [5, 10, 5]) },
+      ];
+      const threeMf = merge3mf(inputs);
+      const meshes = extractColorMeshes(threeMf.buffer as ArrayBuffer);
+      expect(meshes).toHaveLength(2);
+      expect(meshes[0].vertices.length).toBe(9);
+    });
+
+    it('throws on too-small binary STL', () => {
+      const tinySTL = new Uint8Array(50); // too small for header
+      // Doesn't start with "solid" so treated as binary
+      tinySTL[0] = 0x00;
+      const inputs: ColoredModel[] = [
+        { color: [1, 0, 0, 1], data: tinySTL },
+        { color: [0, 0, 1, 1], data: makeTriangleSTL([0, 0, 5], [10, 0, 5], [5, 10, 5]) },
+      ];
+      expect(() => merge3mf(inputs)).toThrow('STL data too small');
+    });
+
+    it('throws on truncated binary STL', () => {
+      // 84-byte header claiming 100 triangles but no actual data
+      const buf = new ArrayBuffer(84);
+      const view = new DataView(buf);
+      view.setUint32(80, 100, true);
+      const inputs: ColoredModel[] = [
+        { color: [1, 0, 0, 1], data: new Uint8Array(buf) },
+        { color: [0, 0, 1, 1], data: makeTriangleSTL([0, 0, 5], [10, 0, 5], [5, 10, 5]) },
+      ];
+      expect(() => merge3mf(inputs)).toThrow('STL data truncated');
+    });
+
+    it('skips empty meshes in merge3mf', () => {
+      // ASCII STL with no facets produces empty mesh
+      const emptyASCII = new TextEncoder().encode('solid empty\nendsolid empty');
+      const inputs: ColoredModel[] = [
+        { color: [1, 0, 0, 1], data: emptyASCII },
+        { color: [0, 0, 1, 1], data: makeTriangleSTL([0, 0, 5], [10, 0, 5], [5, 10, 5]) },
+      ];
+      // Should not throw — empty mesh is skipped
+      const threeMf = merge3mf(inputs);
+      const groups = extractColorGroups(threeMf.buffer as ArrayBuffer);
+      // Only 1 color group (the non-empty mesh)
+      expect(groups).toHaveLength(1);
+    });
+
+    it('extractColorMeshes returns empty for 3MF without model file', () => {
+      // Create a valid ZIP but without a 3dmodel.model file
+      const { zipSync } = require('fflate');
+      const zipData = zipSync({ 'other.txt': new TextEncoder().encode('not a model') });
+      expect(extractColorMeshes(zipData.buffer as ArrayBuffer)).toHaveLength(0);
+    });
+
+    it('extractColorGroups returns empty for 3MF without model file', () => {
+      const { zipSync } = require('fflate');
+      const zipData = zipSync({ 'other.txt': new TextEncoder().encode('not a model') });
+      expect(extractColorGroups(zipData.buffer as ArrayBuffer)).toHaveLength(0);
+    });
+
+    it('extractColorMeshes skips objects with unknown pid', () => {
+      // Create a 3MF with an object referencing a non-existent colorgroup
+      const { zipSync } = require('fflate');
+      const modelXml = `<?xml version="1.0"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<resources>
+  <colorgroup id="1"><color color="#FF0000FF" /></colorgroup>
+  <colorgroup id="2"><color color="#0000FFFF" /></colorgroup>
+  <object id="3" type="model" pid="1" pindex="0">
+    <mesh><vertices><vertex x="0" y="0" z="0" /><vertex x="1" y="0" z="0" /><vertex x="0" y="1" z="0" /></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" /></triangles></mesh>
+  </object>
+  <object id="4" type="model" pid="999" pindex="0">
+    <mesh><vertices><vertex x="0" y="0" z="5" /><vertex x="1" y="0" z="5" /><vertex x="0" y="1" z="5" /></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" /></triangles></mesh>
+  </object>
+</resources>
+<build><item objectid="3" /></build>
+</model>`;
+      const zipData = zipSync({ '3D': { '3dmodel.model': new TextEncoder().encode(modelXml) } });
+      const meshes = extractColorMeshes(zipData.buffer as ArrayBuffer);
+      // Object with pid=999 should be skipped (unknown colorgroup)
+      expect(meshes).toHaveLength(1);
+      expect(meshes[0].extruder).toBe(0);
+    });
+
+    it('extractColorMeshes handles object with empty triangles', () => {
+      const { zipSync } = require('fflate');
+      const modelXml = `<?xml version="1.0"?>
+<model xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+<resources>
+  <colorgroup id="1"><color color="#FF0000FF" /></colorgroup>
+  <colorgroup id="2"><color color="#0000FFFF" /></colorgroup>
+  <object id="3" type="model" pid="1" pindex="0">
+    <mesh><vertices><vertex x="0" y="0" z="0" /></vertices>
+    <triangles></triangles></mesh>
+  </object>
+  <object id="4" type="model" pid="2" pindex="0">
+    <mesh><vertices><vertex x="0" y="0" z="5" /><vertex x="1" y="0" z="5" /><vertex x="0" y="1" z="5" /></vertices>
+    <triangles><triangle v1="0" v2="1" v3="2" /></triangles></mesh>
+  </object>
+</resources>
+<build><item objectid="3" /></build>
+</model>`;
+      const zipData = zipSync({ '3D': { '3dmodel.model': new TextEncoder().encode(modelXml) } });
+      const meshes = extractColorMeshes(zipData.buffer as ArrayBuffer);
+      // Object with no triangles should be skipped (triangleVerts.length === 0)
+      expect(meshes).toHaveLength(1);
     });
 
     it('roundtrips: merge → extract preserves color hex values', () => {

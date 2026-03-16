@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Moonraker REST API client for fetching printer configuration.
  *
@@ -87,15 +88,10 @@ async function moonrakerGet<T>(address: string, path: string): Promise<T> {
   return res.json();
 }
 
-async function moonrakerPost<T>(address: string, path: string, body?: unknown): Promise<T> {
+async function moonrakerPost<T>(address: string, path: string): Promise<T> {
   const url = buildMoonrakerUrl(address, path);
   checkMixedContent(url);
-  const res = await fetch(url, {
-    method: 'POST',
-    mode: 'cors',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const res = await fetch(url, { method: 'POST', mode: 'cors' });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`Moonraker ${path} failed (${res.status}): ${text || res.statusText}`);
@@ -146,13 +142,15 @@ export async function startPrint(address: string, fileName: string): Promise<voi
  * Fetch all printer configuration data from Moonraker and return a unified PrinterConfig.
  * Fetches configfile + toolhead in parallel, then parses raw printer.cfg for start/end gcode.
  */
-export async function fetchPrinterConfig(address: string): Promise<PrinterConfig> {
-  const [config, toolhead, rawCfg] = await Promise.all([
-    fetchConfigfile(address),
-    fetchToolhead(address),
-    fetchRawPrinterCfg(address).catch(() => ''),
-  ]);
-
+/**
+ * Parse printer configuration from Moonraker configfile + toolhead data + raw config text.
+ * Pure function — no I/O, suitable for unit testing.
+ */
+export function parsePrinterConfig(
+  config: Record<string, Record<string, string>>,
+  toolhead: { max_velocity: number; max_accel: number; square_corner_velocity: number },
+  rawCfg: string,
+): PrinterConfig {
   // Parse bed dimensions from stepper_x / stepper_y position_min/max
   const stepperX = config['stepper_x'] ?? {};
   const stepperY = config['stepper_y'] ?? {};
@@ -210,13 +208,23 @@ export async function fetchPrinterConfig(address: string): Promise<PrinterConfig
   };
 }
 
+export async function fetchPrinterConfig(address: string): Promise<PrinterConfig> {
+  const [config, toolhead, rawCfg] = await Promise.all([
+    fetchConfigfile(address),
+    fetchToolhead(address),
+    fetchRawPrinterCfg(address).catch(() => ''),
+  ]);
+
+  return parsePrinterConfig(config, toolhead, rawCfg);
+}
+
 // ─── Config parsing helpers ─────────────────────────────────────────────────
 
 /**
  * Extract a gcode_macro block (e.g. [gcode_macro START_PRINT]) from raw printer.cfg.
  * Returns the gcode content or empty string if not found.
  */
-function extractGcodeBlock(rawCfg: string, macroName: string): string {
+export function extractGcodeBlock(rawCfg: string, macroName: string): string {
   const pattern = new RegExp(
     `\\[gcode_macro\\s+${macroName}\\]\\s*\\n([\\s\\S]*?)(?=\\n\\[|$)`,
     'i',
@@ -226,7 +234,7 @@ function extractGcodeBlock(rawCfg: string, macroName: string): string {
 
   // Find the gcode: line within the macro block
   const block = match[1];
-  const gcodeMatch = block.match(/^gcode\s*:\s*([\s\S]*?)(?=\n\S|\n*$)/m);
+  const gcodeMatch = block.match(/^gcode\s*:\s*([\s\S]*)$/m);
   if (!gcodeMatch) return '';
 
   // The gcode value is the first line after "gcode:" plus all continuation lines (indented)
@@ -248,7 +256,7 @@ function extractGcodeBlock(rawCfg: string, macroName: string): string {
  * Extract a plain gcode section (e.g. start_gcode:) from the [extruder] or [printer] section.
  * Klipper configs sometimes inline start/end gcode directly rather than using macros.
  */
-function extractGcodeSection(rawCfg: string, sectionName: string): string {
+export function extractGcodeSection(rawCfg: string, sectionName: string): string {
   const pattern = new RegExp(`^${sectionName}\\s*:\\s*(.*)$`, 'im');
   const match = rawCfg.match(pattern);
   if (!match) return '';

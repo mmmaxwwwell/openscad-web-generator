@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import type {
   ScadParam,
   ScadParamSet,
@@ -178,6 +179,37 @@ export function parseDescription(source: string): string {
     .map((l) => l.replace(/^\/\/\s?/, ''))
     .filter((l) => l.length > 0)
     .join('\n');
+}
+
+// ─── Slicer Settings ─────────────────────────────────────
+
+export interface ScadSlicerSettings {
+  topSingleWallLayers?: number;
+}
+
+/**
+ * Parse slicer settings from a scad file.
+ * Format:
+ *   // BEGIN_SLICER_SETTINGS
+ *   // top_single_wall_layers = 3
+ *   // END_SLICER_SETTINGS
+ */
+export function parseSlicerSettings(source: string): ScadSlicerSettings {
+  const section = extractSection(source, '// BEGIN_SLICER_SETTINGS', '// END_SLICER_SETTINGS');
+  if (!section) return {};
+
+  const settings: ScadSlicerSettings = {};
+  for (const line of section.split('\n')) {
+    const trimmed = line.trim();
+    const match = trimmed.match(/^\/\/\s*(\w+)\s*=\s*(.+)$/);
+    if (!match) continue;
+    const [, key, rawValue] = match;
+    const { value } = parseValue(rawValue);
+    if (key === 'top_single_wall_layers' && typeof value === 'number') {
+      settings.topSingleWallLayers = value;
+    }
+  }
+  return settings;
 }
 
 // ─── Full File Parser ────────────────────────────────────

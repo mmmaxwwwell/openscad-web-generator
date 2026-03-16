@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Main-thread API for communicating with the OpenSCAD Web Worker.
  *
@@ -96,7 +97,7 @@ export function createOpenSCADApi(): OpenSCADApi {
     } else if (msg.type === 'success') {
       console.log('[OpenSCAD] Render succeeded');
       entry.resolve(msg.output);
-    } else if (msg.type === 'error') {
+    } else {
       console.error('[OpenSCAD] Render error:', msg.error);
       if (msg.logs.length > 0) {
         console.error('[OpenSCAD] Logs:\n' + msg.logs.join('\n'));

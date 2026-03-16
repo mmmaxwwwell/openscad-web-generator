@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Per-extruder filament assignment, persisted per printer address in localStorage.
  *

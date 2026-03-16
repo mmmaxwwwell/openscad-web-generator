@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Per-printer filament overrides — lets users tweak filament settings
  * (temp, speed, retraction, fan) for a specific printer without modifying

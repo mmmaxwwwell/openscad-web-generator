@@ -39,6 +39,9 @@
         };
 
         packages.openscad-wasm = pkgs.callPackage ./nix/openscad-wasm.nix {};
+        packages.libslic3r-deps = pkgs.callPackage ./nix/libslic3r-deps.nix {};
+        packages.libslic3r-lib = pkgs.callPackage ./nix/libslic3r-lib.nix {};
+        packages.libslic3r-wasm = pkgs.callPackage ./nix/libslic3r-wasm.nix {};
 
         packages.default = pkgs.buildNpmPackage {
           pname = "openscad-web-generator";

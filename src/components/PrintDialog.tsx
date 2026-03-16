@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+// SPDX-License-Identifier: AGPL-3.0-or-later
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Printer } from '../hooks/usePrinters';
 import type { FilamentProfile } from '../hooks/useFilaments';
 import { useExtruderFilaments } from '../hooks/useExtruderFilaments';
@@ -6,12 +7,13 @@ import { usePrinterFilamentOverrides, type PrinterFilamentOverride } from '../ho
 import { startPrint, type PrinterConfig } from '../lib/moonraker-api';
 import type { SliceProgress, SliceResult } from '../hooks/useSlicer';
 import type { ColorGroup } from '../lib/merge-3mf';
-import { extractColorMeshes } from '../lib/merge-3mf';
-import type { MultiColorMesh } from '../lib/kiri-engine';
 import type { PrintProfile } from '../types/print-profile';
 import { DEFAULT_PRINT_PROFILE } from '../types/print-profile';
 import { getPrinterProfile, getNozzleProfile } from '../data/printer-profiles';
-import { buildProcessSettings, buildDeviceSettings, type PrinterSettings } from '../lib/slicer-settings';
+import { buildPrusaConfig, type PrinterSettings } from '../lib/slicer-settings';
+import type { ScadSlicerSettings } from '../lib/scad-parser';
+import type { ParsedGCode } from '../lib/gcode-parser';
+import { GCodePreview } from './GCodePreview';
 
 // Re-export for any external consumers
 export type { PrintProfile } from '../types/print-profile';
@@ -118,21 +120,21 @@ interface PrintDialogProps {
   threeMfData?: ArrayBuffer;
   onSlice: (
     stlData: ArrayBuffer,
-    processSettings: Record<string, unknown>,
-    deviceSettings: Record<string, unknown>,
-    tools?: unknown[],
-    multiColorMeshes?: MultiColorMesh[],
+    config: Record<string, string>,
+    threeMfData?: ArrayBuffer,
   ) => Promise<SliceResult>;
   slicerStatus: string;
   slicerProgress: SliceProgress | null;
   slicerError: string | null;
   slicerDebugLog?: string[];
+  onCancelSlice?: () => void;
   onUploadGcode: (gcode: string, fileName: string) => Promise<void>;
   onClose: () => void;
   onToast?: (message: string) => void;
+  scadSlicerSettings?: ScadSlicerSettings;
 }
 
-type DialogPhase = 'configure' | 'slicing' | 'done' | 'error';
+type DialogPhase = 'configure' | 'slicing' | 'done' | 'error' | 'preview';
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -150,6 +152,35 @@ function progressPercent(p: SliceProgress): number {
   };
   const [start, end] = stageWeights[p.stage] ?? [0, 1];
   return Math.round((start + (end - start) * p.progress) * 100);
+}
+
+/** Auto-scrolling slicer log */
+function SlicerLog({ lines }: { lines: string[] }) {
+  const ref = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [lines.length]);
+  return (
+    <pre
+      ref={ref}
+      style={{
+        fontSize: '0.65rem',
+        opacity: 0.8,
+        marginTop: '0.5rem',
+        height: '120px',
+        overflow: 'auto',
+        background: '#111',
+        color: '#0f0',
+        padding: '0.5rem',
+        borderRadius: '4px',
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-all',
+      }}
+    >
+      {lines.join('\n')}
+    </pre>
+  );
 }
 
 /** A field label with override indicator and reset button */
@@ -196,9 +227,11 @@ export function PrintDialog({
   slicerProgress,
   slicerError,
   slicerDebugLog,
+  onCancelSlice,
   onUploadGcode,
   onClose,
   onToast,
+  scadSlicerSettings,
 }: PrintDialogProps) {
   const hasMulticolor = colorGroups && colorGroups.length > 1;
 
@@ -206,7 +239,12 @@ export function PrintDialog({
   const [profile, setProfile] = useState<PrintProfile>(() => {
     const base = printProfileFromProfile(printer.profileId, printer.nozzleDiameter);
     const saved = loadSavedProfile(printer.address);
-    return saved ? { ...base, ...saved } : base;
+    const merged = saved ? { ...base, ...saved } : base;
+    // Apply scad file slicer overrides as initial defaults
+    if (scadSlicerSettings?.topSingleWallLayers !== undefined) {
+      merged.topSingleWallLayers = scadSlicerSettings.topSingleWallLayers;
+    }
+    return merged;
   });
   const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(
     () => printerSettingsFromProfile(printer.profileId),
@@ -217,6 +255,11 @@ export function PrintDialog({
   const [activeSection, setActiveSection] = useState<string>(
     hasMulticolor ? 'extruders' : 'quality',
   );
+
+  // GCode preview state
+  const [parsedGCode, setParsedGCode] = useState<ParsedGCode | null>(null);
+  const [previewProgress, setPreviewProgress] = useState(0);
+  const previewWorkerRef = useRef<Worker | null>(null);
 
   // Per-color extruder assignments (color group index → extruder index)
   const [extruderAssignments, setExtruderAssignments] = useState<Record<number, number>>(() => {
@@ -297,51 +340,87 @@ export function PrintDialog({
     setUploadError(null);
     try {
       saveProfile(printer.address, profile);
-      const processSettings = buildProcessSettings(profile, resolved);
-      const deviceSettings = buildDeviceSettings(printerConfig, printerSettings, extruderCount, getFilamentForExtruder, filaments);
+      const config = buildPrusaConfig(profile, resolved, printerSettings, printerConfig, extruderCount);
 
-      // Build tools array for multi-extruder
-      let tools: unknown[] | undefined;
-      if (extruderCount > 1) {
-        tools = Array.from({ length: extruderCount }, (_, i) => {
-          const fil = getFilamentForExtruder(i, filaments);
-          return {
-            extNozzle: printerConfig?.nozzleDiameter ?? 0.4,
-            extFilament: printerConfig?.filamentDiameter ?? 1.75,
-            extOffsetX: 0,
-            extOffsetY: 0,
-            extSelect: [`T${i}`],
-            extDeselect: [],
-            extTemp: fil.nozzleTemp,
-          };
-        });
-      }
-
-      // Extract per-color meshes from 3MF for multi-material slicing
-      let multiColorMeshes: MultiColorMesh[] | undefined;
-      if (hasMulticolor && threeMfData) {
-        const colorMeshes = extractColorMeshes(threeMfData);
-        if (colorMeshes.length > 1) {
-          multiColorMeshes = colorMeshes.map((cm) => ({
-            vertices: cm.vertices,
-            extruder: extruderAssignments[cm.extruder] ?? cm.extruder,
-          }));
-        }
-      }
-
-      const result = await onSlice(stlData, processSettings, deviceSettings, tools, multiColorMeshes);
+      // For multi-color, pass the 3MF buffer directly — PrusaSlicer handles
+      // extruder assignment internally from 3MF metadata.
+      const result = await onSlice(stlData, config, hasMulticolor ? threeMfData : undefined);
       setSliceResult(result);
       setPhase('done');
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'Slicing cancelled') {
+        setPhase('configure');
+        return;
+      }
       setPhase('error');
-      setUploadError(err instanceof Error ? err.message : String(err));
+      setUploadError(msg);
     }
-  }, [profile, resolved, printerConfig, printerSettings, stlData, fileName, onSlice, printer.address, extruderCount, getFilamentForExtruder, filaments, hasMulticolor, threeMfData, extruderAssignments]);
+  }, [profile, resolved, printerConfig, printerSettings, stlData, onSlice, printer.address, extruderCount, hasMulticolor, threeMfData]);
 
   const gcodeFileName = useMemo(
     () => fileName.replace(/\.(stl|3mf|scad)$/i, '') + '.gcode',
     [fileName],
   );
+
+  /** Auto-start parsing GCode for inline preview when sliceResult arrives */
+  useEffect(() => {
+    if (!sliceResult || parsedGCode) return;
+    // Don't re-parse if already parsing
+    if (previewWorkerRef.current) return;
+
+    setPreviewProgress(0);
+
+    const worker = new Worker(
+      new URL('../workers/gcode-preview-worker.ts', import.meta.url),
+      { type: 'module' },
+    );
+    previewWorkerRef.current = worker;
+
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data;
+      if (msg.type === 'progress') {
+        setPreviewProgress(msg.progress);
+      } else if (msg.type === 'done') {
+        setParsedGCode(msg.result);
+        worker.terminate();
+        previewWorkerRef.current = null;
+      } else if (msg.type === 'error') {
+        worker.terminate();
+        previewWorkerRef.current = null;
+      } else if (msg.type === 'cancelled') {
+        worker.terminate();
+        previewWorkerRef.current = null;
+      }
+    };
+
+    worker.postMessage({ type: 'parse', gcode: sliceResult.gcode });
+  }, [sliceResult, parsedGCode]);
+
+  // Clean up worker on unmount
+  useEffect(() => {
+    return () => {
+      if (previewWorkerRef.current) {
+        previewWorkerRef.current.terminate();
+        previewWorkerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Escape key: fullscreen preview → done → close dialog
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      if (phase === 'preview') {
+        setPhase('done');
+      } else {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [phase, onClose]);
 
   const sections = [
     ...(hasMulticolor ? [{ id: 'extruders', label: 'Extruders' }] : []),
@@ -359,7 +438,25 @@ export function PrintDialog({
   ];
 
   return (
-    <div className="printer-settings-overlay" onClick={onClose}>
+    <>
+    {phase === 'preview' && parsedGCode && (
+      <div className="gcode-preview-fullscreen">
+        <GCodePreview
+          parsedGCode={parsedGCode}
+          bedWidth={printerSettings.bedWidth}
+          bedDepth={printerSettings.bedDepth}
+          originCenter={printerSettings.originCenter}
+          nozzleDiameter={printerConfig?.nozzleDiameter ?? 0.4}
+          extruderColors={
+            colorGroups && colorGroups.length > 1
+              ? colorGroups.map((cg) => cg.colorHex.slice(0, 7))
+              : undefined
+          }
+          onBack={() => setPhase('done')}
+        />
+      </div>
+    )}
+    <div className="printer-settings-overlay" onClick={onClose} style={phase === 'preview' ? { display: 'none' } : undefined}>
       <div className="printer-settings-dialog print-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="printer-settings-header">
           <h3>Print: {fileName}</h3>
@@ -561,6 +658,11 @@ export function PrintDialog({
                     <span>Bottom Layers</span>
                     <input type="number" value={profile.bottomLayers} min={0} max={20}
                       onChange={(e) => updateProfile('bottomLayers', Number(e.target.value))} />
+                  </label>
+                  <label className="print-dialog-field">
+                    <span>Top Single-Wall Layers</span>
+                    <input type="number" value={profile.topSingleWallLayers} min={0} max={50}
+                      onChange={(e) => updateProfile('topSingleWallLayers', Number(e.target.value))} />
                   </label>
                 </>
               )}
@@ -868,9 +970,16 @@ export function PrintDialog({
               </p>
             )}
             {slicerDebugLog && slicerDebugLog.length > 0 && (
-              <pre style={{ fontSize: '0.65rem', opacity: 0.8, marginTop: '0.5rem', maxHeight: '200px', overflow: 'auto', background: '#111', color: '#0f0', padding: '0.5rem', borderRadius: '4px', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                {slicerDebugLog.join('\n')}
-              </pre>
+              <SlicerLog lines={slicerDebugLog} />
+            )}
+            {onCancelSlice && (
+              <button
+                className="print-dialog-cancel-btn"
+                onClick={onCancelSlice}
+                style={{ marginTop: '0.75rem' }}
+              >
+                Cancel
+              </button>
             )}
           </div>
         )}
@@ -882,15 +991,50 @@ export function PrintDialog({
                 {uploadError}
               </p>
             )}
-            <p className="print-dialog-success">
-              Slicing complete
-            </p>
-            {sliceResult.printTime && (
-              <p>Estimated print time: {formatTime(sliceResult.printTime)}</p>
+
+            {/* Inline GCode preview */}
+            {parsedGCode ? (
+              <div className="print-dialog-inline-preview">
+                <GCodePreview
+                  parsedGCode={parsedGCode}
+                  bedWidth={printerSettings.bedWidth}
+                  bedDepth={printerSettings.bedDepth}
+                  originCenter={printerSettings.originCenter}
+                  nozzleDiameter={printerConfig?.nozzleDiameter ?? 0.4}
+                  extruderColors={
+                    colorGroups && colorGroups.length > 1
+                      ? colorGroups.map((cg) => cg.colorHex.slice(0, 7))
+                      : undefined
+                  }
+                />
+                <button
+                  className="print-dialog-fullscreen-btn"
+                  onClick={() => setPhase('preview')}
+                  title="Fullscreen preview"
+                >
+                  &#x26F6;
+                </button>
+              </div>
+            ) : (
+              <div className="print-dialog-preview-loading">
+                <p>Preparing preview... {Math.round(previewProgress * 100)}%</p>
+                <div className="print-dialog-progress-bar">
+                  <div
+                    className="print-dialog-progress-fill"
+                    style={{ width: `${Math.round(previewProgress * 100)}%` }}
+                  />
+                </div>
+              </div>
             )}
-            {sliceResult.filamentUsed && (
-              <p>Filament used: {(sliceResult.filamentUsed / 1000).toFixed(1)}m</p>
-            )}
+
+            <div className="print-dialog-done-info">
+              {sliceResult.printTime && (
+                <span>Time: {formatTime(sliceResult.printTime)}</span>
+              )}
+              {sliceResult.filamentUsed && (
+                <span>Filament: {(sliceResult.filamentUsed / 1000).toFixed(1)}m</span>
+              )}
+            </div>
             <div className="print-dialog-done-actions">
               <button
                 className="print-dialog-start-btn"
@@ -946,5 +1090,6 @@ export function PrintDialog({
         )}
       </div>
     </div>
+    </>
   );
 }

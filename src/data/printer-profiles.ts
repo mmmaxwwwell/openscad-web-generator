@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Printer profiles — predefined printer models with nozzle variants,
  * machine kinematics, bed geometry, and per-filament defaults.

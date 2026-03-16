@@ -7,6 +7,9 @@
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
     <title>OpenSCAD Web Parameter Editor</title>
+    <!-- Enable COOP/COEP on hosts that don't support custom headers (e.g. GitHub Pages).
+         Required for SharedArrayBuffer (slicer WASM pthreads). -->
+    <script src="coi-serviceworker.min.js"></script>
   </head>
   <body>
     <div id="root"></div>

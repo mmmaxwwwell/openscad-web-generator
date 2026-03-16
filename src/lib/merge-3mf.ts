@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * Merge multiple single-color STL files into one multi-color 3MF.
  *
@@ -26,7 +27,7 @@ export interface ColorGroup {
  * Returns the list of colors found in colorgroup elements, in order.
  * Returns empty array if no color groups found (single-color model).
  */
-/** A per-color-group mesh extracted from a multi-color 3MF, ready for Kiri:Moto. */
+/** A per-color-group mesh extracted from a multi-color 3MF. */
 export interface ColorMesh {
   /** Extruder index (0-based, from color group order) */
   extruder: number;
@@ -65,8 +66,59 @@ export function extractColorMeshes(threeMfData: ArrayBuffer): ColorMesh[] {
     }
     if (colorGroupMap.size < 2) return []; // single-color, no need to split
 
-    // Parse mesh objects with colorgroup assignment:
-    // <object id="N" ... pid="colorGroupId" ...><mesh><vertices>...</vertices><triangles>...</triangles></mesh></object>
+    // Detect format: per-triangle pid (single merged mesh) or per-object pid (separate objects).
+    // Per-triangle pid: triangles have pid="N" attributes within a single mesh.
+    // Per-object pid: each <object> has pid="N" with its own <mesh>.
+    const hasPerTrianglePid = /<triangle\s+[^>]*pid="/.test(modelXml);
+
+    if (hasPerTrianglePid) {
+      // Single-mesh format: one object with per-triangle colorgroup assignment
+      const verticesMatch = modelXml.match(/<vertices>([\s\S]*?)<\/vertices>/);
+      const trianglesMatch = modelXml.match(/<triangles>([\s\S]*?)<\/triangles>/);
+      if (!verticesMatch || !trianglesMatch) return [];
+
+      const vertexData: number[] = [];
+      const vertexRe = /<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"\s*\/>/g;
+      let vMatch: RegExpExecArray | null;
+      while ((vMatch = vertexRe.exec(verticesMatch[1])) !== null) {
+        vertexData.push(parseFloat(vMatch[1]), parseFloat(vMatch[2]), parseFloat(vMatch[3]));
+      }
+
+      // Get object-level pid as default for triangles without explicit pid
+      const objPidMatch = modelXml.match(/<object\s+[^>]*pid="(\d+)"/);
+      const defaultPid = objPidMatch ? objPidMatch[1] : null;
+
+      const triVertsByColor = new Map<string, number[]>();
+      const triRe = /<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"(?:\s+pid="(\d+)")?(?:\s+p1="\d+")?\s*\/>/g;
+      let tMatch: RegExpExecArray | null;
+      while ((tMatch = triRe.exec(trianglesMatch[1])) !== null) {
+        const pid = tMatch[4] || defaultPid;
+        if (!pid || !colorGroupMap.has(pid)) continue;
+
+        let verts = triVertsByColor.get(pid);
+        if (!verts) {
+          verts = [];
+          triVertsByColor.set(pid, verts);
+        }
+        for (const vi of [parseInt(tMatch[1]), parseInt(tMatch[2]), parseInt(tMatch[3])]) {
+          verts.push(vertexData[vi * 3], vertexData[vi * 3 + 1], vertexData[vi * 3 + 2]);
+        }
+      }
+
+      const meshes: ColorMesh[] = [];
+      for (const pid of colorGroupOrder) {
+        const verts = triVertsByColor.get(pid);
+        if (!verts || verts.length === 0) continue;
+        meshes.push({
+          extruder: colorGroupOrder.indexOf(pid),
+          colorHex: colorGroupMap.get(pid)!,
+          vertices: new Float32Array(verts),
+        });
+      }
+      return meshes;
+    }
+
+    // Multi-object format: each object has its own mesh with object-level pid
     const objectRe = /<object\s+[^>]*id="(\d+)"[^>]*pid="(\d+)"[^>]*>[\s\S]*?<vertices>([\s\S]*?)<\/vertices>\s*<triangles>([\s\S]*?)<\/triangles>[\s\S]*?<\/object>/g;
     const meshes: ColorMesh[] = [];
     let objMatch: RegExpExecArray | null;
@@ -76,9 +128,7 @@ export function extractColorMeshes(threeMfData: ArrayBuffer): ColorMesh[] {
       if (!colorHex) continue;
 
       const extruder = colorGroupOrder.indexOf(pid);
-      if (extruder < 0) continue;
 
-      // Parse vertices
       const vertexData: number[] = [];
       const vertexRe = /<vertex\s+x="([^"]+)"\s+y="([^"]+)"\s+z="([^"]+)"\s*\/>/g;
       let vMatch: RegExpExecArray | null;
@@ -86,7 +136,6 @@ export function extractColorMeshes(threeMfData: ArrayBuffer): ColorMesh[] {
         vertexData.push(parseFloat(vMatch[1]), parseFloat(vMatch[2]), parseFloat(vMatch[3]));
       }
 
-      // Parse triangles and emit vertex triples
       const triangleVerts: number[] = [];
       const triRe = /<triangle\s+v1="(\d+)"\s+v2="(\d+)"\s+v3="(\d+)"\s*\/>/g;
       let tMatch: RegExpExecArray | null;
@@ -218,7 +267,14 @@ function extractMeshFromSTL(data: Uint8Array): Mesh {
   } else {
     // Binary STL
     const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+    if (data.byteLength < 84) {
+      throw new Error(`STL data too small: ${data.byteLength} bytes (need at least 84)`);
+    }
     const numTriangles = view.getUint32(80, true);
+    const expectedSize = 84 + numTriangles * 50;
+    if (data.byteLength < expectedSize) {
+      throw new Error(`STL data truncated: ${data.byteLength} bytes but header claims ${numTriangles} triangles (need ${expectedSize})`);
+    }
 
     for (let i = 0; i < numTriangles; i++) {
       const offset = 84 + i * 50;
@@ -259,13 +315,10 @@ export function merge3mf(inputs: ColoredModel[]): Uint8Array {
   }
 
   // Resource IDs start at 1 and increment.
-  // Layout: colorgroup1, mesh1, colorgroup2, mesh2, ..., componentsObject
-  // Each color gets: colorGroupId, then meshId
   let nextId = 1;
 
   interface MeshEntry {
     colorGroupId: number;
-    meshId: number;
     mesh: Mesh;
     color: [number, number, number, number];
     colorHex: string;
@@ -279,30 +332,39 @@ export function merge3mf(inputs: ColoredModel[]): Uint8Array {
     if (mesh.vertices.length === 0) continue; // skip empty meshes
 
     const colorGroupId = nextId++;
-    const meshId = nextId++;
     const colorHex = colorToHex(input.color);
     const colorLabel = `[${input.color.join(', ')}]`;
 
-    entries.push({ colorGroupId, meshId, mesh, color: input.color, colorHex, colorLabel });
+    entries.push({ colorGroupId, mesh, color: input.color, colorHex, colorLabel });
   }
 
-  const componentsObjectId = nextId++;
+  // Create one 3MF object per color. PrusaSlicer loads each as a separate object
+  // with its own mesh. The C++ slicer bindings merge them into a single object
+  // with per-volume extruder assignments for correct multi-material slicing.
+  const objectIds: number[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    objectIds.push(nextId++);
+  }
 
-  // Build the model XML
+  // Build the model XML — one object per color with its own mesh
   const lines: string[] = [];
   lines.push('<?xml version="1.0" encoding="UTF-8"?>');
   lines.push('<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">');
   lines.push('  <metadata name="Application">OpenSCAD Web Generator</metadata>');
   lines.push('  <resources>');
 
+  // Color groups (one per color, for display)
   for (const entry of entries) {
-    // ColorGroup with a single color
     lines.push(`    <colorgroup id="${entry.colorGroupId}">`);
     lines.push(`      <color color="${entry.colorHex}" />`);
     lines.push(`    </colorgroup>`);
+  }
 
-    // Mesh object with object-level color property
-    lines.push(`    <object id="${entry.meshId}" type="model" pid="${entry.colorGroupId}" pindex="0" name="${escXml(entry.colorLabel)}">`);
+  // One object per color, each with its own mesh
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const objId = objectIds[i];
+    lines.push(`    <object id="${objId}" type="model" pid="${entry.colorGroupId}" pindex="0">`);
     lines.push('      <mesh>');
     lines.push('        <vertices>');
     for (const v of entry.mesh.vertices) {
@@ -318,34 +380,32 @@ export function merge3mf(inputs: ColoredModel[]): Uint8Array {
     lines.push('    </object>');
   }
 
-  // Components object grouping all meshes
-  lines.push(`    <object id="${componentsObjectId}" type="model">`);
-  lines.push('      <components>');
-  for (const entry of entries) {
-    lines.push(`        <component objectid="${entry.meshId}" />`);
-  }
-  lines.push('      </components>');
-  lines.push('    </object>');
-
   lines.push('  </resources>');
   lines.push('  <build>');
-  lines.push(`    <item objectid="${componentsObjectId}" />`);
+  for (const objId of objectIds) {
+    lines.push(`    <item objectid="${objId}" />`);
+  }
   lines.push('  </build>');
   lines.push('</model>');
 
   const modelXml = lines.join('\n');
 
-  // Build slicer metadata (Bambu Studio / OrcaSlicer compatibility)
+  // Build slicer metadata — assigns extruder per object for PrusaSlicer
   const metaLines: string[] = [];
   metaLines.push('<?xml version="1.0" encoding="UTF-8"?>');
   metaLines.push('<config>');
-  metaLines.push(`  <object id="${componentsObjectId}">`);
-  for (const entry of entries) {
-    metaLines.push(`    <part id="${entry.meshId}" subtype="normal_part">`);
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const objId = objectIds[i];
+    metaLines.push(`  <object id="${objId}">`);
+    metaLines.push(`    <metadata key="name" value="${escXml(entry.colorLabel)}" />`);
+    metaLines.push(`    <metadata key="extruder" value="${i + 1}" />`);
+    metaLines.push(`    <part id="0" subtype="normal_part">`);
     metaLines.push(`      <metadata key="name" value="${escXml(entry.colorLabel)}" />`);
+    metaLines.push(`      <metadata key="extruder" value="${i + 1}" />`);
     metaLines.push('    </part>');
+    metaLines.push('  </object>');
   }
-  metaLines.push('  </object>');
   metaLines.push('</config>');
   const modelSettings = metaLines.join('\n');
 

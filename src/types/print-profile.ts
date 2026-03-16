@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
  * PrintProfile — printer & filament agnostic print settings.
  *
@@ -44,6 +45,8 @@ export interface PrintProfile {
   zHopHeight: number;
   // Arc fitting
   arcEnabled: boolean;
+  // Top single-wall: reduce to 1 shell for the topmost N layers
+  topSingleWallLayers: number;
 }
 
 export const DEFAULT_PRINT_PROFILE: PrintProfile = {
@@ -75,4 +78,5 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   retractOnLayerChange: true,
   zHopHeight: 0,
   arcEnabled: false,
+  topSingleWallLayers: 0,
 };

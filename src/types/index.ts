@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 // Supported parameter value types
 export type ScadParamType = 'number' | 'string' | 'text' | 'boolean' | 'vector' | 'enum';
 

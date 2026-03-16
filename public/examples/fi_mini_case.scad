@@ -16,10 +16,14 @@ include <qr.scad>
 // Keep it short — more text means smaller QR modules,
 // which may exceed your printer's resolution.
 // Leave empty for no QR code.
-qr_code_text = "";
+qr_code_text = "google.com";
 // END_PARAMS
 
-qr_thickness = 1;  // mm - thickness of QR code modules
+// BEGIN_SLICER_SETTINGS
+top_single_wall_layers = 7;
+// END_SLICER_SETTINGS
+
+qr_thickness = 1.4;  // mm - thickness of QR code modules
 
 // ============================================================
 // COORDINATE SYSTEM OVERVIEW
@@ -384,12 +388,20 @@ module full_case() {
 
 case_z_top = (wall_thickness - collar_thickness) / 2 + full_case_height / 2;
 
-qr_size = 25;  // mm - QR code fits within the top surface
+qr_size = 35;  // mm - QR code fills most of the top surface
 
-module qr_code() {
+module qr_dark_modules() {
     translate([0, 0, case_z_top - qr_thickness + 0.01])
-        qr(qr_code_text,
-           width = qr_size, height = qr_size, thickness = qr_thickness, center = true);
+        mirror([0, 1, 0])
+            qr(qr_code_text, error_correction = "L",
+               width = qr_size, height = qr_size, thickness = qr_thickness, center = true);
+}
+
+// Full QR-sized pocket (background area)
+module qr_pocket() {
+    translate([0, 0, case_z_top - qr_thickness + 0.01])
+        linear_extrude(qr_thickness)
+            square([qr_size, qr_size], center = true);
 }
 
 // ============================================================
@@ -405,26 +417,23 @@ module top_half() {
 
 split_z = -fi_height / 2;
 
-// Top half — body (black), with QR code subtracted if a URL is provided
+// Top half — body (black), with QR dark modules subtracted to create recesses
 translate([0, 0, fi_height / 2])
     color("black")
         if (qr_code_text != "") {
             difference() {
                 top_half();
-                qr_code();
+                qr_dark_modules();
             }
         } else {
             top_half();
         }
 
-// QR code (white), only the part that intersects the top half
+// QR code dark modules (white) — fills the recesses cut into the black case
 if (qr_code_text != "")
     translate([0, 0, fi_height / 2])
         color("white")
-            intersection() {
-                qr_code();
-                top_half();
-            }
+            qr_dark_modules();
 
 // Cap (bottom half) — everything below split_z, flipped 180° and
 // translated so the bottom of the cap sits on z=0, offset in Y

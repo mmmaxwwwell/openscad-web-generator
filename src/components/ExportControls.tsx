@@ -1,10 +1,11 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ScadValue } from '../types';
 import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
 import type { OutputFormat } from '../lib/openscad-api';
 import type { Printer } from '../hooks/usePrinters';
 import type { ColorGroup } from '../lib/merge-3mf';
-import { extractColorGroups } from '../lib/merge-3mf';
+import { extractColorGroups, extractColorMeshes } from '../lib/merge-3mf';
 import { computeCacheKey, getCachedRender, setCachedRender, hasCachedRender } from '../lib/render-cache';
 import { SendToPrinterButton } from './SendToPrinterButton';
 
@@ -38,6 +39,33 @@ function formatExt(format: ExportType): string {
 
 function formatSuffix(format: ExportType): string {
   return format === 'multicolor-3mf' ? '-multicolor' : '';
+}
+
+/** Build a binary STL from per-color Float32Array meshes extracted from a 3MF */
+function buildSTLFromMeshes(threeMfData: ArrayBuffer): ArrayBuffer {
+  const meshes = extractColorMeshes(threeMfData);
+  // Count total triangles across all meshes (each triangle = 9 floats = 3 vertices × 3 coords)
+  let totalTris = 0;
+  for (const m of meshes) totalTris += m.vertices.length / 9;
+  // Binary STL: 80-byte header + 4-byte tri count + 50 bytes per triangle
+  const buf = new ArrayBuffer(84 + totalTris * 50);
+  const view = new DataView(buf);
+  view.setUint32(80, totalTris, true);
+  let offset = 84;
+  for (const m of meshes) {
+    for (let i = 0; i < m.vertices.length; i += 9) {
+      // Normal (0,0,0) — viewers recalculate anyway
+      offset += 12;
+      // 3 vertices
+      for (let v = 0; v < 9; v++) {
+        view.setFloat32(offset, m.vertices[i + v], true);
+        offset += 4;
+      }
+      // Attribute byte count
+      offset += 2;
+    }
+  }
+  return buf;
 }
 
 export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast, onSendToPrinter }: ExportControlsProps) {
@@ -83,20 +111,17 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
     setError(null);
     setErrorLogs([]);
     try {
-      // Check cache first
+      // Always do a fresh render — never use cache for the Render button.
+      // The result is cached afterward so Send to Printer / Download can use it.
       const cacheKey = await computeCacheKey(source, params, format);
-      const cached = await getCachedRender(cacheKey);
 
       let data: ArrayBuffer;
-      if (cached) {
-        data = cached;
-      } else if (format === 'multicolor-3mf') {
+      if (format === 'multicolor-3mf') {
         data = await openscad.renderMulticolor(source, params);
-        await setCachedRender(cacheKey, data, format);
       } else {
         data = await openscad.render(source, params, format);
-        await setCachedRender(cacheKey, data, format);
       }
+      await setCachedRender(cacheKey, data, format);
 
       const previewFormat: OutputFormat = format === 'multicolor-3mf' ? '3mf' : format;
       onModelGenerated?.(data, previewFormat);
@@ -136,59 +161,52 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
   const isDisabled = !source || openscad.status === 'rendering' || openscad.status === 'loading';
 
   // Send to printer for a specific format — fetches cached data and opens the print dialog
+  // For multicolor-3mf, builds STL from the 3MF mesh data to avoid a separate render
   const handleSendForFormat = useCallback(async (format: ExportType, printer: Printer) => {
     if (!onSendToPrinter || !source) return;
 
-    // For STL: send STL data directly, check if multicolor 3MF is also available
-    // For 3MF: send the 3MF as STL fallback (slicer needs STL)
-    // For multicolor-3mf: send with color groups for multi-material slicing
+    const baseName = fileName.replace(/\.scad$/i, '');
 
-    // Always need STL data for slicing
-    const stlCacheKey = await computeCacheKey(source, params, 'stl');
-    let stlData = await getCachedRender(stlCacheKey);
-
-    if (format === 'stl') {
-      if (!stlData) {
-        onToast?.('Render STL first before sending to printer');
-        return;
-      }
-      // Check if multicolor 3MF is also cached for color info
-      let colorGroups: ColorGroup[] | undefined;
-      const multicolorKey = await computeCacheKey(source, params, 'multicolor-3mf');
-      const multicolorData = await getCachedRender(multicolorKey);
-      if (multicolorData) {
-        const groups = extractColorGroups(multicolorData);
-        if (groups.length > 1) colorGroups = groups;
-      }
-      const baseName = fileName.replace(/\.scad$/i, '');
-      onSendToPrinter(printer, stlData, `${baseName}.stl`, colorGroups, colorGroups ? multicolorData! : undefined);
-    } else if (format === '3mf') {
-      // For plain 3MF, we still need STL for the slicer
-      if (!stlData) {
-        onToast?.('Render STL first — the slicer needs STL data');
-        return;
-      }
-      const baseName = fileName.replace(/\.scad$/i, '');
-      onSendToPrinter(printer, stlData, `${baseName}.stl`);
-    } else if (format === 'multicolor-3mf') {
-      // Multicolor: need STL + multicolor 3MF for color groups
-      if (!stlData) {
-        onToast?.('Render STL first — the slicer needs STL data');
-        return;
-      }
+    if (format === 'multicolor-3mf') {
       const multicolorKey = await computeCacheKey(source, params, 'multicolor-3mf');
       const multicolorData = await getCachedRender(multicolorKey);
       if (!multicolorData) {
         onToast?.('Render Multi-Color 3MF first');
         return;
       }
+      // Build STL from cached 3MF meshes (no re-render needed)
+      const stlCacheKey = await computeCacheKey(source, params, 'stl');
+      let stlData = await getCachedRender(stlCacheKey);
+      if (!stlData) {
+        stlData = buildSTLFromMeshes(multicolorData);
+        await setCachedRender(stlCacheKey, stlData, 'stl');
+        setCachedFormats((prev) => new Set(prev).add('stl'));
+      }
       let colorGroups: ColorGroup[] | undefined;
       const groups = extractColorGroups(multicolorData);
       if (groups.length > 1) colorGroups = groups;
-      const baseName = fileName.replace(/\.scad$/i, '');
       onSendToPrinter(printer, stlData, `${baseName}.stl`, colorGroups, multicolorData);
+      return;
     }
-  }, [onSendToPrinter, source, params, fileName, onToast]);
+
+    // STL/3MF formats — need STL data for slicing
+    const stlCacheKey = await computeCacheKey(source, params, 'stl');
+    let stlData = await getCachedRender(stlCacheKey);
+
+    if (!stlData) {
+      onToast?.('Generating STL for slicer…');
+      try {
+        stlData = await openscad.render(source, params, 'stl');
+        await setCachedRender(stlCacheKey, stlData, 'stl');
+        setCachedFormats((prev) => new Set(prev).add('stl'));
+      } catch {
+        onToast?.('STL render failed — cannot send to printer');
+        return;
+      }
+    }
+
+    onSendToPrinter(printer, stlData, `${baseName}.stl`);
+  }, [onSendToPrinter, source, params, openscad, fileName, onToast]);
 
   const hasPrinters = printers.length > 0 && onSendToPrinter;
 

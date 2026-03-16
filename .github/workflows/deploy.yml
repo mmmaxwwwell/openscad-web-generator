@@ -33,6 +33,10 @@ jobs:
           node scripts/bundle-bosl2.mjs
           node scripts/bundle-qr.mjs
 
+      - name: Download slicer WASM (optional)
+        continue-on-error: true
+        run: node scripts/download-slicer-wasm.mjs
+
       - name: Build
         run: npx vite build
 

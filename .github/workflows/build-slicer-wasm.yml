@@ -1,0 +1,54 @@
+name: Build Slicer WASM
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag for the built artifacts (e.g. slicer-wasm-v0.1.0)'
+        required: true
+        default: 'slicer-wasm-v0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build libslic3r WASM via Nix
+        run: nix build .#libslic3r-wasm --print-build-logs
+
+      - name: Verify build output
+        run: |
+          ls -lh result/
+          test -f result/libslic3r.js
+          test -f result/libslic3r.wasm
+          echo "libslic3r.wasm size: $(du -h result/libslic3r.wasm | cut -f1)"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: "Slicer WASM ${{ github.event.inputs.tag }}"
+          body: |
+            Pre-built libslic3r WASM artifacts.
+
+            Built from commit ${{ github.sha }} via `nix build .#libslic3r-wasm`.
+
+            These artifacts are downloaded automatically by the deploy workflow
+            and by `scripts/download-slicer-wasm.mjs`.
+          files: |
+            result/libslic3r.js
+            result/libslic3r.wasm
+            result/libslic3r.worker.js
+          fail_on_unmatched_files: false

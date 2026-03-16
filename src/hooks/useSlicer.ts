@@ -1,13 +1,13 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 /**
- * React hook wrapping the Kiri:Moto slicing engine.
+ * React hook wrapping the slicer engine via a Web Worker.
  *
- * Provides a lazy-initialized slicer that converts STL data to GCode.
- * The engine runs its own web worker internally — this hook just
- * manages the lifecycle and exposes status/progress to React.
+ * Provides a lazy-initialized slicer that converts STL/3MF data to GCode.
+ * The worker is created on the first slice() call and reused for subsequent calls.
+ * The WASM module is loaded inside the worker (heavy, ~15-20MB).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { SlicerEngine, MultiColorMesh } from '../lib/kiri-engine';
 
 export type SlicerStatus = 'idle' | 'loading' | 'ready' | 'slicing' | 'error';
 
@@ -20,7 +20,7 @@ export interface SliceProgress {
 
 export interface SliceResult {
   gcode: string;
-  /** Estimated print time in seconds (from Kiri:Moto) */
+  /** Estimated print time in seconds */
   printTime?: number;
   /** Filament used in mm (parsed from gcode comments) */
   filamentUsed?: number;
@@ -37,207 +37,220 @@ export interface UseSlicerResult {
   debugLog: string[];
   /**
    * Slice an STL buffer into GCode.
-   * @param stlData - Binary STL data as ArrayBuffer
-   * @param processSettings - Kiri:Moto process settings (layer height, infill, etc.)
-   * @param deviceSettings - Kiri:Moto device settings (bed size, speeds, etc.)
-   * @param tools - Optional multi-extruder tool config
-   * @param multiColorMeshes - Optional per-color meshes for multi-material (overrides stlData)
+   * @param stlData - Binary STL data as ArrayBuffer (used for single-color)
+   * @param config - PrusaSlicer config key/value pairs
+   * @param threeMfData - Optional 3MF buffer for multi-color (PrusaSlicer handles extruder assignment from 3MF metadata)
    */
   slice: (
     stlData: ArrayBuffer,
-    processSettings?: Record<string, unknown>,
-    deviceSettings?: Record<string, unknown>,
-    tools?: unknown[],
-    multiColorMeshes?: MultiColorMesh[],
+    config?: Record<string, string>,
+    threeMfData?: ArrayBuffer,
   ) => Promise<SliceResult>;
+  /** Cancel an in-flight slicing operation */
+  cancel: () => void;
   /** Reset the slicer (clears error state, creates fresh engine on next slice) */
   reset: () => void;
 }
 
-/** Parse print stats from Kiri:Moto gcode comments */
-function parseGcodeStats(gcode: string): { printTime?: number; filamentUsed?: number } {
-  const timeMatch = gcode.match(/; --- print time: (\d+)s ---/);
-  const filamentMatch = gcode.match(/; --- filament used: ([\d.]+) mm ---/);
+/** Parse print stats from gcode comments */
+export function parseGcodeStats(gcode: string): { printTime?: number; filamentUsed?: number } {
+  // PrusaSlicer format
+  const psTimeMatch = gcode.match(/; estimated printing time \(normal mode\) = (?:(\d+)h )?(?:(\d+)m )?(?:(\d+)s)?/);
+  const psFilamentMatch = gcode.match(/; filament used \[mm\] = ([\d.]+)/);
+  let printTime: number | undefined;
+  if (psTimeMatch) {
+    const h = parseInt(psTimeMatch[1] || '0', 10);
+    const m = parseInt(psTimeMatch[2] || '0', 10);
+    const s = parseInt(psTimeMatch[3] || '0', 10);
+    printTime = h * 3600 + m * 60 + s;
+  }
   return {
-    printTime: timeMatch ? parseInt(timeMatch[1], 10) : undefined,
-    filamentUsed: filamentMatch ? parseFloat(filamentMatch[1]) : undefined,
+    printTime,
+    filamentUsed: psFilamentMatch ? parseFloat(psFilamentMatch[1]) : undefined,
   };
 }
 
+/**
+ * Map worker progress stages to the SliceProgress stage names used by the UI.
+ *
+ * Worker stages (from slicer-worker.ts):
+ *   loading, loading_model → parsing (loading WASM + parsing model data)
+ *   configuring, slicing    → slicing (apply config + PrusaSlicer process)
+ *   exporting               → exporting (GCode generation)
+ */
+function mapWorkerStage(workerStage: string): SliceProgress['stage'] {
+  switch (workerStage) {
+    case 'loading':
+    case 'loading_model':
+      return 'parsing';
+    case 'configuring':
+    case 'slicing':
+      return 'slicing';
+    case 'exporting':
+      return 'exporting';
+    default:
+      return 'slicing';
+  }
+}
+
 export function useSlicer(): UseSlicerResult {
-  const engineRef = useRef<SlicerEngine | null>(null);
   const [status, setStatus] = useState<SlicerStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<SliceProgress | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+
   const mountedRef = useRef(true);
+  const workerRef = useRef<Worker | null>(null);
+  const pendingRef = useRef<{
+    resolve: (result: SliceResult) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
 
-  const addDebug = (msg: string) => {
-    const ts = new Date().toLocaleTimeString();
-    setDebugLog(prev => [...prev.slice(-19), `${ts} ${msg}`]);
-  };
-
+  // Track mounted state for safe setState calls
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      // Terminate worker on unmount
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      // Reject any pending slice
+      if (pendingRef.current) {
+        pendingRef.current.reject(new Error('Component unmounted'));
+        pendingRef.current = null;
+      }
     };
   }, []);
 
-  const ensureEngine = useCallback(async (): Promise<SlicerEngine> => {
-    if (engineRef.current) return engineRef.current;
+  /** Create the worker lazily on first use */
+  const getWorker = useCallback((): Worker => {
+    if (workerRef.current) return workerRef.current;
 
-    if (mountedRef.current) {
-      setStatus('loading');
-      setError(null);
-    }
+    const worker = new Worker(
+      new URL('../workers/slicer-worker.ts', import.meta.url),
+      { type: 'module' },
+    );
 
-    // Dynamic import so the ~1.2MB kiri bundle is only loaded when needed
-    const { createSlicerEngine } = await import('../lib/kiri-engine');
-    const engine = createSlicerEngine();
-    engineRef.current = engine;
+    worker.onmessage = (e: MessageEvent) => {
+      const msg = e.data;
+      if (!mountedRef.current) return;
 
-    if (mountedRef.current) setStatus('ready');
-    return engine;
+      if (msg.type === 'progress') {
+        const stage = mapWorkerStage(msg.stage);
+        setProgress({ stage, progress: msg.progress, message: msg.message });
+        const logEntry = msg.message
+          ? `[${msg.stage}] ${msg.message}`
+          : `[${msg.stage}] ${Math.round(msg.progress * 100)}%`;
+        setDebugLog(prev => [...prev, logEntry]);
+      } else if (msg.type === 'done') {
+        setStatus('ready');
+        setProgress(null);
+        const result: SliceResult = {
+          gcode: msg.gcode,
+          printTime: msg.stats?.printTime,
+          filamentUsed: msg.stats?.filamentUsed,
+        };
+        pendingRef.current?.resolve(result);
+        pendingRef.current = null;
+      } else if (msg.type === 'error') {
+        setStatus('error');
+        setError(msg.message);
+        setProgress(null);
+        setDebugLog(prev => [...prev, `ERROR: ${msg.message}`]);
+        pendingRef.current?.reject(new Error(msg.message));
+        pendingRef.current = null;
+      }
+    };
+
+    worker.onerror = (e: ErrorEvent) => {
+      if (!mountedRef.current) return;
+      const message = e.message || 'Worker crashed';
+      setStatus('error');
+      setError(message);
+      setProgress(null);
+      setDebugLog(prev => [...prev, `WORKER ERROR: ${message}`]);
+      pendingRef.current?.reject(new Error(message));
+      pendingRef.current = null;
+      // Worker is dead — clear ref so a new one is created on retry
+      workerRef.current = null;
+    };
+
+    workerRef.current = worker;
+    return worker;
   }, []);
 
   const slice = useCallback(async (
     stlData: ArrayBuffer,
-    processSettings?: Record<string, unknown>,
-    deviceSettings?: Record<string, unknown>,
-    tools?: unknown[],
-    multiColorMeshes?: MultiColorMesh[],
+    config?: Record<string, string>,
+    threeMfData?: ArrayBuffer,
   ): Promise<SliceResult> => {
-    setDebugLog([]);
-    addDebug(`stlData=${stlData.byteLength}b multi=${multiColorMeshes?.length ?? 'none'}`);
-    const engine = await ensureEngine();
-    addDebug('engine ready');
+    // Reject any in-flight operation
+    if (pendingRef.current) {
+      pendingRef.current.reject(new Error('Superseded by new slice request'));
+      pendingRef.current = null;
+    }
 
     if (mountedRef.current) {
       setStatus('slicing');
       setError(null);
       setProgress({ stage: 'parsing', progress: 0 });
+      setDebugLog([]);
     }
 
-    // Set up progress listener
-    engine.setListener((event: unknown) => {
-      if (!mountedRef.current) return;
-      const evt = event as Record<string, unknown>;
+    const worker = getWorker();
 
-      if (evt.slice) {
-        const sliceEvt = evt.slice as Record<string, unknown>;
-        if (sliceEvt.error) {
-          addDebug(`SLICE ERROR: ${sliceEvt.error}`);
-          setProgress({
-            stage: 'slicing',
-            progress: 0,
-            message: `ERROR: ${sliceEvt.error}`,
-          });
-        } else if (typeof sliceEvt.update === 'number') {
-          setProgress({
-            stage: 'slicing',
-            progress: sliceEvt.update as number,
-            message: sliceEvt.updateStatus as string | undefined,
-          });
-        }
-        if (sliceEvt.alert) {
-          addDebug(`ALERT: ${sliceEvt.alert}`);
-        }
-      } else if (evt.prepare) {
-        const prepEvt = evt.prepare as Record<string, unknown>;
-        if (typeof prepEvt.update === 'number') {
-          setProgress({
-            stage: 'preparing',
-            progress: prepEvt.update as number,
-          });
-        } else if (prepEvt.done) {
-          setProgress({ stage: 'preparing', progress: 1 });
-        }
-      } else if (evt.export) {
-        setProgress({ stage: 'exporting', progress: 0.5 });
+    return new Promise<SliceResult>((resolve, reject) => {
+      pendingRef.current = { resolve, reject };
+
+      if (threeMfData) {
+        // Multi-color: pass the 3MF buffer directly — PrusaSlicer handles
+        // extruder assignment internally from 3MF metadata.
+        worker.postMessage(
+          { type: 'slice3mf', data: threeMfData, config: config || {} },
+          [threeMfData],
+        );
       } else {
-        // Log any unhandled events
-        addDebug(`evt: ${JSON.stringify(evt).slice(0, 120)}`);
+        // Single-color: pass the STL buffer
+        worker.postMessage(
+          { type: 'slice', stlData, config: config || {} },
+          [stlData],
+        );
       }
     });
+  }, [getWorker]);
 
-    try {
-      // Parse mesh data
-      if (mountedRef.current) {
-        setProgress({ stage: 'parsing', progress: 0.5 });
-      }
-      if (multiColorMeshes && multiColorMeshes.length > 1) {
-        addDebug(`parseMultiColor ${multiColorMeshes.length} meshes`);
-        engine.parseMultiColor(multiColorMeshes);
-      } else {
-        addDebug('parsing STL...');
-        await engine.parse(stlData);
-      }
-      addDebug('parse done');
-
-      // Apply settings
-      if (processSettings) {
-        addDebug(`setProcess: h=${processSettings.sliceHeight} fill=${processSettings.sliceFillSparse}`);
-        engine.setProcess(processSettings);
-      }
-      if (deviceSettings) {
-        addDebug(`setDevice: bed=${deviceSettings.bedWidth}x${deviceSettings.bedDepth} ext=${(deviceSettings.extruders as unknown[])?.length ?? '?'}`);
-        engine.setDevice(deviceSettings);
-      }
-      if (tools) {
-        addDebug(`setTools: ${tools.length}`);
-        engine.setTools(tools);
-      }
-
-      // Slice → Prepare → Export
-      addDebug('slice start...');
-      if (mountedRef.current) {
-        setProgress({ stage: 'slicing', progress: 0 });
-      }
-      await engine.slice();
-      addDebug('slice done');
-
-      addDebug('prepare start...');
-      if (mountedRef.current) {
-        setProgress({ stage: 'preparing', progress: 0 });
-      }
-      await engine.prepare();
-      addDebug('prepare done');
-
-      addDebug('export start...');
-      if (mountedRef.current) {
-        setProgress({ stage: 'exporting', progress: 0 });
-      }
-      const gcode = await engine.export();
-      addDebug(`export done: ${gcode.length} chars`);
-
-      const stats = parseGcodeStats(gcode);
-
-      if (mountedRef.current) {
-        setStatus('ready');
-        setProgress(null);
-      }
-
-      return { gcode, ...stats };
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      addDebug(`CATCH ERROR: ${message}`);
-      if (mountedRef.current) {
-        setStatus('error');
-        setError(message);
-        setProgress(null);
-      }
-      throw err;
+  const cancel = useCallback(() => {
+    const worker = workerRef.current;
+    if (worker) {
+      worker.postMessage({ type: 'cancel' });
     }
-  }, [ensureEngine]);
+    if (mountedRef.current) {
+      setStatus('idle');
+      setProgress(null);
+    }
+    if (pendingRef.current) {
+      pendingRef.current.reject(new Error('Slicing cancelled'));
+      pendingRef.current = null;
+    }
+  }, []);
 
   const reset = useCallback(() => {
-    engineRef.current = null;
+    // Terminate the current worker so a fresh one is created on next slice
+    if (workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = null;
+    }
+    if (pendingRef.current) {
+      pendingRef.current.reject(new Error('Slicer reset'));
+      pendingRef.current = null;
+    }
     setStatus('idle');
     setError(null);
     setProgress(null);
     setDebugLog([]);
   }, []);
 
-  return { status, error, progress, debugLog, slice, reset };
+  return { status, error, progress, debugLog, slice, cancel, reset };
 }

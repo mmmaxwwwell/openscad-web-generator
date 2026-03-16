@@ -12,3 +12,6 @@ android/build/
 android/local.properties
 *.apk
 vendor/grid-apps/
+coverage/
+test-output/
+agent-work/
