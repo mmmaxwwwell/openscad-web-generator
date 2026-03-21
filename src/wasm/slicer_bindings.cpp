@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-// C++ embind wrapper around PrusaSlicer's libslic3r API.
+// C++ embind wrapper around OrcaSlicer's libslic3r API.
 // Exposes a minimal slicing API for use from JavaScript/WASM workers.
 
 #include <emscripten/bind.h>
@@ -27,7 +27,7 @@ extern "C" {
 }
 
 // Stub QOI image encoder for WASM.
-// PrusaSlicer uses qoi_encode for generating thumbnail images in G-code.
+// OrcaSlicer uses qoi_encode for generating thumbnail images in G-code.
 // Thumbnails are not needed in the WASM slicing pipeline, so we stub it out.
 extern "C" {
     void* qoi_encode(const void* /*data*/, const void* /*desc*/, int* out_len) {
@@ -36,20 +36,19 @@ extern "C" {
     }
 }
 
-// Stub pthread_setname_np — PrusaSlicer's Thread.cpp calls this to name threads.
+// Stub pthread_setname_np — OrcaSlicer's Thread.cpp calls this to name threads.
 // Even without -pthread, TBB headers may reference it.
 extern "C" {
     int pthread_setname_np(unsigned long /*thread*/, const char* /*name*/) {
         return 0; // success, no-op
     }
 }
-#include <boost/optional/optional.hpp>
 
 #include "libslic3r/Model.hpp"
+#include "libslic3r/PrintBase.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Exception.hpp"
-#include "libslic3r/Semver.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/3mf.hpp"
 
@@ -80,7 +79,7 @@ private:
 class WasmSlicer {
 public:
     WasmSlicer() {
-        // Initialize default config with PrusaSlicer defaults
+        // Initialize default config with OrcaSlicer defaults
         m_config.apply(Slic3r::FullPrintConfig::defaults());
     }
 
@@ -120,8 +119,7 @@ public:
         Slic3r::DynamicPrintConfig config_from_3mf;
         Slic3r::ConfigSubstitutionContext subst_ctx(Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent);
         m_model = Slic3r::Model();
-        boost::optional<Slic3r::Semver> generator_version;
-        if (!Slic3r::load_3mf(path.c_str(), config_from_3mf, subst_ctx, &m_model, false, generator_version)) {
+        if (!Slic3r::load_3mf(path.c_str(), config_from_3mf, subst_ctx, &m_model, false)) {
             throw std::runtime_error("Failed to load 3MF file: " + path);
         }
 
@@ -130,13 +128,13 @@ public:
         }
 
         // Multi-color 3MF from OpenSCAD: each color is a separate object.
-        // PrusaSlicer validates each object independently and requires every
+        // OrcaSlicer validates each object independently and requires every
         // object to have extrusions on the first layer. For stacked multi-color
         // models (e.g. red cube Z=0..10, white cube Z=10..20), the top object
         // has no geometry at Z=0, causing "no extrusions in the first layer".
         //
         // Fix: merge all objects into a single object with multiple volumes,
-        // each volume assigned to its original extruder. PrusaSlicer treats
+        // each volume assigned to its original extruder. OrcaSlicer treats
         // volumes within one object as a single unit for first-layer validation.
         if (m_model.objects.size() > 1) {
             auto* merged = m_model.objects[0];
@@ -226,15 +224,15 @@ public:
         m_from_3mf = true;
     }
 
-    // Set a single PrusaSlicer config key-value pair.
-    // Keys and values follow PrusaSlicer .ini format.
+    // Set a single OrcaSlicer config key-value pair.
+    // Keys and values follow OrcaSlicer/PrusaSlicer .ini format.
     // Example: setConfigString("layer_height", "0.2")
     void setConfigString(const std::string& key, const std::string& value) {
         try {
             m_config.set_deserialize_strict(key, value);
         } catch (const Slic3r::UnknownOptionException&) {
             // Silently ignore unknown options — our config map may include
-            // keys that don't exist in this PrusaSlicer version.
+            // keys that don't exist in this OrcaSlicer version.
         }
     }
 
@@ -251,8 +249,8 @@ public:
             // Center model instances on the bed if needed
             if (m_needs_centering) {
                 EM_ASM({ console.log('[slicer-wasm] Centering model on bed...'); });
-                // Get bed center from config's bed_shape
-                auto* bed_shape_opt = m_config.option<Slic3r::ConfigOptionPoints>("bed_shape");
+                // Get bed center from config's printable_area (OrcaSlicer key, was bed_shape in PrusaSlicer)
+                auto* bed_shape_opt = m_config.option<Slic3r::ConfigOptionPoints>("printable_area");
                 if (bed_shape_opt && !bed_shape_opt->values.empty()) {
                     Slic3r::Vec2d center(0, 0);
                     for (const auto& pt : bed_shape_opt->values) {
@@ -270,7 +268,7 @@ public:
 
             // Ensure the model sits on the print bed (Z >= 0).
             // OpenSCAD models often use center=true which places geometry below Z=0.
-            // Without this, PrusaSlicer clips the below-bed portion.
+            // Without this, the slicer clips the below-bed portion.
             if (m_from_3mf) {
                 // For 3MF files: multi-color 3MF objects have correct world-space
                 // positions from OpenSCAD's per-color rendering. Calling ensure_on_bed()
@@ -305,15 +303,16 @@ public:
             m_print->apply(m_model, m_config);
 
             // Validate the print configuration
+            // OrcaSlicer's validate() returns StringObjectException (struct with .string member)
             EM_ASM({ console.log('[slicer-wasm] Validating print...'); });
-            std::vector<std::string> warnings;
-            auto err = m_print->validate(&warnings);
-            if (!err.empty()) {
-                throw std::runtime_error("Print validation failed: " + err);
+            Slic3r::StringObjectException warning;
+            auto err = m_print->validate(&warning);
+            if (!err.string.empty()) {
+                throw std::runtime_error("Print validation failed: " + err.string);
             }
-            for (const auto& w : warnings) {
+            if (!warning.string.empty()) {
                 EM_ASM({ console.warn('[slicer-wasm] Validation warning:', UTF8ToString($0)); },
-                       w.c_str());
+                       warning.string.c_str());
             }
 
             // Run the slicing and G-code generation pipeline

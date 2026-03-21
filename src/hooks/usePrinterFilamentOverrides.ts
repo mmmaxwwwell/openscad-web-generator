@@ -21,10 +21,30 @@ export interface PrinterFilamentOverride {
   printSpeed?: number;
   retractDist?: number;
   retractSpeed?: number;
+  deretractionSpeed?: number;
   firstLayerNozzleTemp?: number;
   firstLayerBedTemp?: number;
   minSpeed?: number;
   minLayerTime?: number;
+  // OrcaSlicer filament fields
+  flowRatio?: number;
+  enablePressureAdvance?: boolean;
+  pressureAdvance?: number;
+  adaptivePressureAdvance?: boolean;
+  overhangFanSpeed?: number;
+  overhangFanThreshold?: number;
+  enableOverhangBridgeFan?: boolean;
+  closeFanFirstLayers?: number;
+  fanCoolingLayerTime?: number;
+  slowDownLayerTime?: number;
+  fanMaxSpeed?: number;
+  // Multi-plate bed temps
+  coolPlateTemp?: number;
+  coolPlateTempInitialLayer?: number;
+  engPlateTemp?: number;
+  engPlateTempInitialLayer?: number;
+  texturedPlateTemp?: number;
+  texturedPlateTempInitialLayer?: number;
 }
 
 export interface ResolvedFilamentSettings {
@@ -35,10 +55,30 @@ export interface ResolvedFilamentSettings {
   printSpeed: number;
   retractDist: number;
   retractSpeed: number;
+  deretractionSpeed: number;
   firstLayerNozzleTemp: number;
   firstLayerBedTemp: number;
   minSpeed: number;
   minLayerTime: number;
+  // OrcaSlicer filament fields
+  flowRatio: number;
+  enablePressureAdvance: boolean;
+  pressureAdvance: number;
+  adaptivePressureAdvance: boolean;
+  overhangFanSpeed: number;
+  overhangFanThreshold: number;
+  enableOverhangBridgeFan: boolean;
+  closeFanFirstLayers: number;
+  fanCoolingLayerTime: number;
+  slowDownLayerTime: number;
+  fanMaxSpeed: number;
+  // Multi-plate bed temps
+  coolPlateTemp: number;
+  coolPlateTempInitialLayer: number;
+  engPlateTemp: number;
+  engPlateTempInitialLayer: number;
+  texturedPlateTemp: number;
+  texturedPlateTempInitialLayer: number;
 }
 
 /** All overrides keyed by printer address, then filament ID */
@@ -72,10 +112,30 @@ function resolveFilament(
     printSpeed: overrides.printSpeed ?? filament.printSpeed,
     retractDist: overrides.retractDist ?? filament.retractDist,
     retractSpeed: overrides.retractSpeed ?? filament.retractSpeed,
+    deretractionSpeed: overrides.deretractionSpeed ?? filament.deretractionSpeed ?? 0,
     firstLayerNozzleTemp: overrides.firstLayerNozzleTemp ?? filament.firstLayerNozzleTemp ?? filament.nozzleTemp,
     firstLayerBedTemp: overrides.firstLayerBedTemp ?? filament.firstLayerBedTemp ?? filament.bedTemp,
     minSpeed: overrides.minSpeed ?? filament.minSpeed ?? 20,
     minLayerTime: overrides.minLayerTime ?? filament.minLayerTime ?? 6,
+    // OrcaSlicer filament fields
+    flowRatio: overrides.flowRatio ?? filament.flowRatio ?? 1.0,
+    enablePressureAdvance: overrides.enablePressureAdvance ?? filament.enablePressureAdvance ?? false,
+    pressureAdvance: overrides.pressureAdvance ?? filament.pressureAdvance ?? 0.04,
+    adaptivePressureAdvance: overrides.adaptivePressureAdvance ?? filament.adaptivePressureAdvance ?? false,
+    overhangFanSpeed: overrides.overhangFanSpeed ?? filament.overhangFanSpeed ?? 100,
+    overhangFanThreshold: overrides.overhangFanThreshold ?? filament.overhangFanThreshold ?? 0,
+    enableOverhangBridgeFan: overrides.enableOverhangBridgeFan ?? filament.enableOverhangBridgeFan ?? true,
+    closeFanFirstLayers: overrides.closeFanFirstLayers ?? filament.closeFanFirstLayers ?? 1,
+    fanCoolingLayerTime: overrides.fanCoolingLayerTime ?? filament.fanCoolingLayerTime ?? 60,
+    slowDownLayerTime: overrides.slowDownLayerTime ?? filament.slowDownLayerTime ?? 4,
+    fanMaxSpeed: overrides.fanMaxSpeed ?? filament.fanMaxSpeed ?? overrides.fanSpeed ?? filament.fanSpeed,
+    // Multi-plate bed temps (default to standard bed temp)
+    coolPlateTemp: overrides.coolPlateTemp ?? filament.coolPlateTemp ?? filament.bedTemp,
+    coolPlateTempInitialLayer: overrides.coolPlateTempInitialLayer ?? filament.coolPlateTempInitialLayer ?? filament.firstLayerBedTemp ?? filament.bedTemp,
+    engPlateTemp: overrides.engPlateTemp ?? filament.engPlateTemp ?? filament.bedTemp,
+    engPlateTempInitialLayer: overrides.engPlateTempInitialLayer ?? filament.engPlateTempInitialLayer ?? filament.firstLayerBedTemp ?? filament.bedTemp,
+    texturedPlateTemp: overrides.texturedPlateTemp ?? filament.texturedPlateTemp ?? filament.bedTemp,
+    texturedPlateTempInitialLayer: overrides.texturedPlateTempInitialLayer ?? filament.texturedPlateTempInitialLayer ?? filament.firstLayerBedTemp ?? filament.bedTemp,
   };
 }
 

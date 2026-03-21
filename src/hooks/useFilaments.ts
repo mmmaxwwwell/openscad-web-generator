@@ -13,12 +13,32 @@ export interface FilamentProfile {
   printSpeed: number; // mm/s
   retractDist: number; // mm
   retractSpeed: number; // mm/s
+  deretractionSpeed?: number; // mm/s (0 = same as retraction)
   firstLayerNozzleTemp: number; // °C
   firstLayerBedTemp: number; // °C
   minSpeed: number; // mm/s — cooling slowdown min speed
   minLayerTime: number; // seconds — min layer time for cooling
   notes: string;
   builtin: boolean; // true = non-deletable preset
+  // OrcaSlicer filament fields (optional for backward compat with saved data)
+  flowRatio?: number; // 0.8-1.2, default 1.0
+  enablePressureAdvance?: boolean;
+  pressureAdvance?: number; // PA value
+  adaptivePressureAdvance?: boolean;
+  overhangFanSpeed?: number; // 0-100
+  overhangFanThreshold?: number; // 0-100, 0 = auto
+  enableOverhangBridgeFan?: boolean;
+  closeFanFirstLayers?: number; // close fan for first N layers
+  fanCoolingLayerTime?: number; // seconds — cooling time threshold
+  slowDownLayerTime?: number; // seconds — slow down if layer time below
+  fanMaxSpeed?: number; // 0-100, max fan speed (default = fanSpeed)
+  // Multi-plate bed temps (default to bedTemp if not set)
+  coolPlateTemp?: number;
+  coolPlateTempInitialLayer?: number;
+  engPlateTemp?: number;
+  engPlateTempInitialLayer?: number;
+  texturedPlateTemp?: number;
+  texturedPlateTempInitialLayer?: number;
 }
 
 /** Generic defaults (no printer profile selected) */
@@ -160,6 +180,18 @@ function loadCustomFilaments(): FilamentProfile[] {
       firstLayerBedTemp: f.firstLayerBedTemp ?? f.bedTemp,
       minSpeed: f.minSpeed ?? 20,
       minLayerTime: f.minLayerTime ?? 6,
+      // Backfill OrcaSlicer fields
+      deretractionSpeed: f.deretractionSpeed ?? 0,
+      flowRatio: f.flowRatio ?? 1.0,
+      enablePressureAdvance: f.enablePressureAdvance ?? false,
+      pressureAdvance: f.pressureAdvance ?? 0.04,
+      adaptivePressureAdvance: f.adaptivePressureAdvance ?? false,
+      overhangFanSpeed: f.overhangFanSpeed ?? 100,
+      overhangFanThreshold: f.overhangFanThreshold ?? 0,
+      enableOverhangBridgeFan: f.enableOverhangBridgeFan ?? true,
+      closeFanFirstLayers: f.closeFanFirstLayers ?? 1,
+      fanCoolingLayerTime: f.fanCoolingLayerTime ?? 60,
+      slowDownLayerTime: f.slowDownLayerTime ?? 4,
     }));
   } catch {
     return [];

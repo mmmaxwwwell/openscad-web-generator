@@ -47,7 +47,7 @@ All of these must be run inside `nix develop` or prefixed with `nix develop -c`.
 
 ```bash
 nix develop -c node scripts/download-slicer-wasm.mjs   # download from GitHub releases
-nix build .#libslic3r-wasm                               # build from source (~50-85 min)
+nix build .#orcaslicer-wasm                              # build from source (~50-85 min)
 nix develop -c node scripts/build-slicer-wasm.mjs       # copy Nix output to public/wasm/
 ```
 
@@ -63,9 +63,11 @@ src/
 ├── main.tsx                # React entry point
 ├── app.css                 # Global styles (vanilla CSS, no CSS-in-JS)
 ├── components/             # 12 React components (UI layer)
+│   ├── __tests__/          # 10 component test files
+│   └── print-settings/    # 9 print settings tab components
 ├── hooks/                  # 9 custom hooks (state & side effects)
-├── lib/                    # 16 utility modules (WASM APIs, parsers, storage)
-│   └── __tests__/          # 16 vitest test files
+├── lib/                    # 17 utility modules (WASM APIs, parsers, storage)
+│   └── __tests__/          # 20 vitest test files
 ├── workers/                # Web Workers (slicer, gcode-preview)
 ├── types/                  # TypeScript type definitions
 │   ├── index.ts            # ScadParam, ScadFile, StorageAdapter, etc.
@@ -100,7 +102,7 @@ No state library — all state lives in custom hooks backed by localStorage or I
 | Hook | Manages |
 |------|---------|
 | `useOpenSCAD` | OpenSCAD WASM worker lifecycle, `render()` / `renderMulticolor()` |
-| `useSlicer` | libslic3r WASM worker, `slice()`, progress, cancellation |
+| `useSlicer` | SlicerBackend (WASM or native), `slice()`, progress, cancellation, `engineName` |
 | `useScadParser` | Parses `.scad` source → `ScadFile` (params, presets, description) |
 | `useStorage` | `StorageAdapter` factory (IndexedDB or S3) |
 | `usePrinters` | Printer list CRUD (localStorage) |
@@ -116,9 +118,12 @@ No state library — all state lives in custom hooks backed by localStorage or I
 | `openscad-api.ts` | Main-thread wrapper for OpenSCAD worker |
 | `openscad-worker.ts` | Worker: loads WASM + font/MCAD/BOSL2/QR modules, fresh instance per render |
 | `slicer-engine.ts` | Typed wrapper for libslic3r Emscripten module |
-| `slicer-settings.ts` | Maps PrintProfile + filament + printer → PrusaSlicer .ini config |
+| `orca-slicer-settings.ts` | `buildOrcaConfig()` — maps PrintProfile + filament + printer → OrcaSlicer config |
+| `slicer-settings.ts` | Shared utilities: `convertKlipperGcode()`, `PrinterSettings`, `getModelHeightFromSTL()` |
+| `slicer-backend.ts` | Abstract `SlicerBackend` interface + WASM/native implementations + factory |
+| `native-slicer-backend.ts` | Android native slicer backend via WebView JS bridge |
 | `scad-parser.ts` | Extracts parameters, presets, description from `.scad` source |
-| `gcode-parser.ts` | Parses GCode → layers with typed segments (PrusaSlicer `;TYPE:` comments) |
+| `gcode-parser.ts` | Parses GCode → layers with typed segments (OrcaSlicer `;TYPE:` comments) |
 | `merge-3mf.ts` | Merges per-color STLs into multi-color 3MF with ColorGroup metadata |
 | `moonraker-api.ts` | HTTP client for Klipper/Moonraker REST API |
 | `render-cache.ts` | IndexedDB cache keyed by SHA256(source + params + format) |
@@ -131,7 +136,7 @@ No state library — all state lives in custom hooks backed by localStorage or I
 | Worker | What it does |
 |--------|-------------|
 | `openscad-worker.ts` (in lib/) | Runs OpenSCAD WASM — creates fresh instance per render (exit() kills runtime) |
-| `slicer-worker.ts` | Runs libslic3r WASM — loads model, applies config, slices, exports GCode |
+| `slicer-worker.ts` | Runs OrcaSlicer libslic3r WASM — loads model, applies config, slices, exports GCode |
 | `gcode-preview-worker.ts` | Parses GCode off main thread (CPU-intensive) |
 
 ### WASM Modules
@@ -140,18 +145,19 @@ Two WASM modules, both loaded in Web Workers:
 
 1. **OpenSCAD WASM** — renders `.scad` → STL/3MF. Downloaded from `openscad/openscad-wasm` GitHub releases. Companion data files: fonts, MCAD, BOSL2, QR. Lives in `public/wasm/`.
 
-2. **libslic3r WASM** — slices STL/3MF → GCode. Built from PrusaSlicer v2.9.4 via Nix (3-stage: deps → lib → WASM bindings with embind). C++ bindings in `src/wasm/slicer_bindings.cpp`. Requires COOP/COEP headers for SharedArrayBuffer (pthreads). **Note:** Multi-color 3MF objects are merged into a single object with multiple volumes (one per color/extruder) during loading — PrusaSlicer requires all volumes in one object for correct multi-material slicing and first-layer validation. `ensure_on_bed()` is only called per-object for STL; for 3MF, a uniform Z translation preserves stacked assembly positions.
+2. **libslic3r WASM** — slices STL/3MF → GCode. Built from OrcaSlicer v2.3.1 via Nix (3-stage: deps → lib → WASM bindings with embind). C++ bindings in `src/wasm/slicer_bindings.cpp`. Requires COOP/COEP headers for SharedArrayBuffer (pthreads). **Note:** Multi-color 3MF objects are merged into a single object with multiple volumes (one per color/extruder) during loading — OrcaSlicer requires all volumes in one object for correct multi-material slicing and first-layer validation. `ensure_on_bed()` is only called per-object for STL; for 3MF, a uniform Z translation preserves stacked assembly positions. On Android, a native ARM64/ARM32 backend (`libslic3r.so`) can be used instead of WASM via the `SlicerBackend` abstraction.
 
 ### Nix Build Derivations (`nix/`)
 
 | File | Builds |
 |------|--------|
 | `openscad-wasm.nix` | OpenSCAD WASM from source (~90 min) |
-| `libslic3r-deps.nix` | 16 C++ dependencies (Boost, TBB, GMP, CGAL, etc.) via Emscripten |
-| `libslic3r-lib.nix` | PrusaSlicer C++ source → static libraries |
-| `libslic3r-wasm.nix` | Links bindings + libs → `libslic3r.{js,wasm,worker.js}` |
+| `orcaslicer-deps.nix` | 16+ C++ dependencies (Boost, TBB, GMP, CGAL, Clipper2, draco, mcut, libnoise, etc.) via Emscripten |
+| `orcaslicer-lib.nix` | OrcaSlicer v2.3.1 libslic3r source → static libraries |
+| `orcaslicer-wasm.nix` | Links bindings + libs → `libslic3r.{js,wasm,worker.js}` |
+| `orcaslicer-android.nix` | Cross-compiles libslic3r for Android ARM64/ARM32 via NDK → `libslic3r.so` |
 
-`flake.nix` exposes: `devShell`, `openscad-wasm`, `libslic3r-deps`, `libslic3r-lib`, `libslic3r-wasm`, `default` (npm production build via `buildNpmPackage`).
+`flake.nix` exposes: `devShell`, `openscad-wasm`, `orcaslicer-deps`, `orcaslicer-lib`, `orcaslicer-wasm`, `orcaslicer-android-arm64`, `orcaslicer-android-arm32`, `default` (npm production build via `buildNpmPackage`).
 
 ### Build Scripts (`scripts/`)
 
@@ -164,6 +170,7 @@ Two WASM modules, both loaded in Web Workers:
 | `download-slicer-wasm.mjs` | Downloads pre-built slicer WASM from GitHub releases |
 | `bundle-bosl2.mjs` | Bundles BOSL2 library into Emscripten data file |
 | `bundle-qr.mjs` | Bundles scadqr library into Emscripten data file |
+| `copy-android-slicer.sh` | Copies Nix-built Android .so + headers into APK project |
 | `profile-slicer.mjs` | Profiling tool for slicer performance |
 
 ### Deployment
@@ -179,11 +186,13 @@ Two WASM modules, both loaded in Web Workers:
 
 ## Testing
 
-- Tests in `src/lib/__tests__/`, run with `nix develop -c npm test`
+- Tests in `src/lib/__tests__/` and `src/components/__tests__/`, run with `nix develop -c npm test`
+- ~1240 tests across 30 test files
 - Vitest with 10s timeout
 - Mock workers via `vi.stubGlobal`, suppress console via `vi.spyOn`
 - Coverage includes `src/lib`, `src/data`, `src/types`
 - Integration tests use Playwright + Chromium (`npm run test:integration`)
+- OrcaSlicer config key mapping has exhaustive tests: every PrintProfile field → config key verified
 
 ## Tech Stack
 
@@ -194,7 +203,7 @@ Two WASM modules, both loaded in Web Workers:
 | Build | Vite 6, Nix flakes |
 | 3D | Three.js 0.183 |
 | Testing | Vitest 4, Playwright |
-| WASM | Emscripten (OpenSCAD + libslic3r/PrusaSlicer v2.9.4) |
+| WASM | Emscripten (OpenSCAD + libslic3r/OrcaSlicer v2.3.1) |
 | Storage | IndexedDB (idb), S3 (@aws-sdk/client-s3) |
 | Compression | fflate (3MF ZIP handling) |
 | Android | Gradle, JDK 17, WebView |
@@ -208,4 +217,4 @@ Two WASM modules, both loaded in Web Workers:
 - Named exports preferred. Types in `src/types/`.
 - Workers loaded via `new Worker(new URL('../workers/foo.ts', import.meta.url))`.
 - No state management library — hooks + localStorage + IndexedDB.
-- License: AGPL-3.0-or-later (required by libslic3r and LibBGCode).
+- License: AGPL-3.0-or-later (required by libslic3r/OrcaSlicer).

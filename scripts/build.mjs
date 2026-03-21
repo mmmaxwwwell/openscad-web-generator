@@ -4,7 +4,7 @@
 /**
  * Build orchestration script.
  * 1. Downloads OpenSCAD WASM if not present (or --force-wasm)
- * 2. Downloads/builds libslic3r WASM if not present (or --force-wasm)
+ * 2. Downloads/builds OrcaSlicer WASM if not present (or --force-wasm)
  * 3. Runs vite build
  * 4. Prints build summary
  */
@@ -48,21 +48,21 @@ async function main() {
     }
   }
 
-  // Step 2: Download or build libslic3r WASM if needed
+  // Step 2: Download or build OrcaSlicer WASM if needed
   if (skipSlicer) {
     console.log('=== Skipping slicer WASM (--skip-slicer) ===');
   } else if (buildSlicer) {
-    console.log('=== Building libslic3r WASM from source ===');
+    console.log('=== Building OrcaSlicer WASM from source ===');
     const args = forceWasm ? ' --force' : '';
     run(`node scripts/build-slicer-wasm.mjs${args}`);
   } else {
     const slicerExists = existsSync(join(WASM_DIR, 'libslic3r.wasm'));
     if (!slicerExists || forceWasm) {
-      console.log('=== Downloading libslic3r WASM ===');
+      console.log('=== Downloading OrcaSlicer WASM ===');
       const args = forceWasm ? ' --force' : '';
       run(`node scripts/download-slicer-wasm.mjs${args}`);
     } else {
-      console.log('=== libslic3r WASM already present, skipping download ===');
+      console.log('=== OrcaSlicer WASM already present, skipping download ===');
     }
   }
 

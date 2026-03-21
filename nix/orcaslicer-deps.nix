@@ -1,8 +1,15 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# libslic3r WASM dependencies — split into individual derivations for caching.
+# OrcaSlicer WASM dependencies — split into individual derivations for caching.
 # Each library is its own derivation; once built it stays in the Nix store.
 # The top-level output is a symlinkJoin that merges them all.
+#
+# Based on libslic3r-deps.nix (PrusaSlicer). Changes:
+# - Removed: LibBGCode, heatshrink (OrcaSlicer doesn't use binary GCode)
+# - Added: Draco (mesh compression), libnoise (fuzzy skin noise generation)
+# - Updated: CGAL 5.6.2→5.6.3, Qhull 8.1-alpha3→8.0.2
+# - Clipper2 and mcut are bundled in OrcaSlicer's deps_src/ — built in lib stage
+# - NanoSVG kept for header-only use by libslic3r internals
 
 { lib
 , stdenv
@@ -150,8 +157,8 @@ let
     cgal = fetchFromGitHub {
       owner = "CGAL";
       repo = "cgal";
-      rev = "v5.6.2";
-      hash = "sha256-ucjeqLbHaS0IDToMM0x90P/BTJiY5kEBYmM5qNB9kSE=";
+      rev = "v5.6.3";
+      hash = "sha256-wS0uNyY6fZzZewAKEhsHgRDG+LH7mlZkVodLeGWxrQg=";
     };
 
     oneTBB = fetchFromGitHub {
@@ -171,8 +178,8 @@ let
     qhull = fetchFromGitHub {
       owner = "qhull";
       repo = "qhull";
-      rev = "v8.1-alpha3";
-      hash = "sha256-XwKWI3b+tqYPIICc9zF2w4panOBFvNv3MRux0rIqUUI=";
+      rev = "v8.0.2";
+      hash = "sha256-djUO3qzY8ch29AuhY3Bn1ajxWZ4/W70icWVrxWRAxRc=";
     };
 
     libpng = fetchFromGitHub {
@@ -189,25 +196,25 @@ let
       hash = "sha256-YeFeBR0S5lrOa9aFYAZcDZXt9IryyTOuJEzDalp5PJQ=";
     };
 
-    heatshrink = fetchFromGitHub {
-      owner = "atomicobject";
-      repo = "heatshrink";
-      rev = "v0.4.1";
-      hash = "sha256-Nm9/+JFMDXY1N90hmNFGh755V2sXSRQ4VBN9f8TcsGk=";
-    };
-
-    libbgcode = fetchFromGitHub {
-      owner = "prusa3d";
-      repo = "libbgcode";
-      rev = "d33a277a3ce2c0a7f9ba325caac6d730e0f7a412";
-      hash = "sha256-bbYL4MHeEZ9VEdSOHakGiMo3nW5CcNMJzc16fR9AvGo=";
-    };
-
     nanosvg = fetchFromGitHub {
       owner = "memononen";
       repo = "nanosvg";
       rev = "5cefd9847949af6df13f65027fd43af5a7513633";
       hash = "sha256-BozXqp3pNxAew+aFUbh6M3ppVQ+U7XMmMCbGT1urfWE=";
+    };
+
+    draco = fetchFromGitHub {
+      owner = "google";
+      repo = "draco";
+      rev = "1.5.7";
+      hash = "sha256-Y1bwBFe3bCklZN2+TBs6mhqDKQjrezMiT5zXlPFuMew=";
+    };
+
+    libnoise = fetchFromGitHub {
+      owner = "SoftFever";
+      repo = "Orca-deps-libnoise";
+      rev = "1.0";
+      hash = "sha256-nzvtWsYz4REVcPRpKysOPOYIlMNhfbDHTkyS7PKvY+c=";
     };
   };
 
@@ -218,7 +225,7 @@ let
   # ---- Header-only libraries ----
 
   nanosvg = stdenv.mkDerivation {
-    pname = "libslic3r-dep-nanosvg";
+    pname = "orcaslicer-dep-nanosvg";
     version = "0-unstable-2025-11-21";
     src = sources.nanosvg;
     dontConfigure = true;
@@ -234,12 +241,12 @@ let
   };
 
   eigen = mkEmscriptenLib {
-    pname = "libslic3r-dep-eigen";
+    pname = "orcaslicer-dep-eigen";
     version = "3.4.0";
     src = sources.eigen;
     cmakeFlags = [];
     preBuildPhase = ''
-      # PrusaSlicer expects <Eigen/...> not <eigen3/Eigen/...>
+      # OrcaSlicer expects <Eigen/...> not <eigen3/Eigen/...>
       postInstallHook() {
         ln -sf $out/include/eigen3/Eigen $out/include/Eigen
         ln -sf $out/include/eigen3/unsupported $out/include/unsupported
@@ -247,7 +254,7 @@ let
     '';
     installPhaseOverride = ''
       runHook preInstall
-      # Symlinks for PrusaSlicer compatibility
+      # Symlinks for OrcaSlicer compatibility
       ln -sf $out/include/eigen3/Eigen $out/include/Eigen
       ln -sf $out/include/eigen3/unsupported $out/include/unsupported
       runHook postInstall
@@ -255,7 +262,7 @@ let
   };
 
   cereal = mkEmscriptenLib {
-    pname = "libslic3r-dep-cereal";
+    pname = "orcaslicer-dep-cereal";
     version = "1.3.2";
     src = sources.cereal;
     cmakeFlags = [
@@ -267,7 +274,7 @@ let
   };
 
   nlohmann_json = mkEmscriptenLib {
-    pname = "libslic3r-dep-nlohmann-json";
+    pname = "orcaslicer-dep-nlohmann-json";
     version = "3.11.3";
     src = sources.nlohmann_json;
     cmakeFlags = [
@@ -277,8 +284,8 @@ let
   };
 
   cgal = mkEmscriptenLib {
-    pname = "libslic3r-dep-cgal";
-    version = "5.6.2";
+    pname = "orcaslicer-dep-cgal";
+    version = "5.6.3";
     src = sources.cgal;
     cmakeFlags = [
       "-DWITH_examples=OFF"
@@ -290,7 +297,7 @@ let
   # ---- Compiled libraries (no deps) ----
 
   zlib = mkEmscriptenLib {
-    pname = "libslic3r-dep-zlib";
+    pname = "orcaslicer-dep-zlib";
     version = "1.3.1";
     src = sources.zlib;
     # zlib uses -B build differently
@@ -308,7 +315,7 @@ let
   };
 
   libexpat = mkEmscriptenLib {
-    pname = "libslic3r-dep-libexpat";
+    pname = "orcaslicer-dep-libexpat";
     version = "2.6.4";
     src = sources.libexpat;
     usesCMake = false;
@@ -335,7 +342,7 @@ let
   };
 
   gmp = mkEmscriptenLib {
-    pname = "libslic3r-dep-gmp";
+    pname = "orcaslicer-dep-gmp";
     version = "6.3.0";
     src = sources.gmp;
     usesCMake = false;
@@ -375,7 +382,7 @@ let
   };
 
   mpfr = mkEmscriptenLib {
-    pname = "libslic3r-dep-mpfr";
+    pname = "orcaslicer-dep-mpfr";
     version = "4.2.1";
     src = sources.mpfr;
     usesCMake = false;
@@ -405,7 +412,7 @@ let
   };
 
   boost = mkEmscriptenLib {
-    pname = "libslic3r-dep-boost";
+    pname = "orcaslicer-dep-boost";
     version = "1.87.0";
     src = sources.boost;
     usesCMake = false;
@@ -457,7 +464,7 @@ let
   };
 
   oneTBB = mkEmscriptenLib {
-    pname = "libslic3r-dep-onetbb";
+    pname = "orcaslicer-dep-onetbb";
     version = "2021.13.0";
     src = sources.oneTBB;
     usesCMake = false;
@@ -539,7 +546,7 @@ THREADSSTUB
   };
 
   nlopt = mkEmscriptenLib {
-    pname = "libslic3r-dep-nlopt";
+    pname = "orcaslicer-dep-nlopt";
     version = "2.5.0";
     src = sources.nlopt;
     cmakeFlags = [
@@ -555,8 +562,8 @@ THREADSSTUB
   };
 
   qhull = mkEmscriptenLib {
-    pname = "libslic3r-dep-qhull";
-    version = "8.1-alpha3";
+    pname = "orcaslicer-dep-qhull";
+    version = "8.0.2";
     src = sources.qhull;
     cmakeFlags = [
       "-DBUILD_SHARED_LIBS=OFF"
@@ -568,7 +575,7 @@ THREADSSTUB
   # ---- Libraries with dependencies ----
 
   libpng = mkEmscriptenLib {
-    pname = "libslic3r-dep-libpng";
+    pname = "orcaslicer-dep-libpng";
     version = "1.6.35";
     src = sources.libpng;
     cmakeFlags = [
@@ -582,7 +589,7 @@ THREADSSTUB
   };
 
   libjpeg_turbo = mkEmscriptenLib {
-    pname = "libslic3r-dep-libjpeg-turbo";
+    pname = "orcaslicer-dep-libjpeg-turbo";
     version = "3.0.1";
     src = sources.libjpeg_turbo;
     cmakeFlags = [
@@ -592,109 +599,41 @@ THREADSSTUB
     ];
   };
 
-  heatshrink = mkEmscriptenLib {
-    pname = "libslic3r-dep-heatshrink";
-    version = "0.4.1";
-    src = sources.heatshrink;
-    usesCMake = false;
+  # ---- NEW: Draco (mesh compression — used by OrcaSlicer for 3MF) ----
+
+  draco = mkEmscriptenLib {
+    pname = "orcaslicer-dep-draco";
+    version = "1.5.7";
+    src = sources.draco;
+    cmakeFlags = [
+      "-DBUILD_SHARED_LIBS=OFF"
+      "-DDRACO_ANIMATION_ENCODING=OFF"
+      "-DDRACO_BACKWARDS_COMPATIBILITY=OFF"
+      "-DDRACO_DECODER_ATTRIBUTE_DEDUPLICATION=OFF"
+      "-DDRACO_JS_GLUE=OFF"
+      "-DDRACO_MESH_COMPRESSION=ON"
+      "-DDRACO_POINT_CLOUD_COMPRESSION=ON"
+      "-DDRACO_PREDICTIVE_EDGEBREAKER=ON"
+      "-DDRACO_STANDARD_EDGEBREAKER=ON"
+      "-DDRACO_TESTS=OFF"
+      "-DDRACO_TRANSCODER_SUPPORTED=OFF"
+      "-DDRACO_WASM=ON"
+    ];
+    # Draco's cmake/draco_emscripten.cmake checks $EMSCRIPTEN env var
     preBuildPhase = ''
-      # heatshrink has no CMakeLists.txt; create a minimal one
-      cat > CMakeLists.txt << 'HEATSHRINK_CMAKE'
-      cmake_minimum_required(VERSION 3.10)
-      project(heatshrink VERSION 0.4.1 LANGUAGES C)
-      add_library(heatshrink STATIC heatshrink_encoder.c heatshrink_decoder.c)
-      target_include_directories(heatshrink PUBLIC
-        $<BUILD_INTERFACE:''${CMAKE_CURRENT_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:include>
-        $<INSTALL_INTERFACE:include/heatshrink>
-      )
-      install(TARGETS heatshrink ARCHIVE DESTINATION lib)
-      install(FILES heatshrink_common.h heatshrink_config.h heatshrink_encoder.h heatshrink_decoder.h DESTINATION include/heatshrink)
-HEATSHRINK_CMAKE
-
-      emcmake cmake \
-        -B build \
-        -G Ninja \
-        -DCMAKE_INSTALL_PREFIX=$out \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-      cmake --build build --parallel
-      cmake --install build
-
-      # Create CMake package config files manually (heatshrink has no native CMake support)
-      mkdir -p $out/lib/cmake/heatshrink
-
-      cat > $out/lib/cmake/heatshrink/heatshrinkConfig.cmake << 'HSCFG'
-# heatshrink CMake package config
-get_filename_component(_hs_prefix "''${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
-
-if(NOT TARGET heatshrink::heatshrink)
-  add_library(heatshrink::heatshrink STATIC IMPORTED)
-  set_target_properties(heatshrink::heatshrink PROPERTIES
-    IMPORTED_LOCATION "''${_hs_prefix}/lib/libheatshrink.a"
-    INTERFACE_INCLUDE_DIRECTORIES "''${_hs_prefix}/include;''${_hs_prefix}/include/heatshrink"
-  )
-endif()
-
-# LibBGCode expects heatshrink::heatshrink_dynalloc
-if(NOT TARGET heatshrink::heatshrink_dynalloc)
-  add_library(heatshrink::heatshrink_dynalloc STATIC IMPORTED)
-  set_target_properties(heatshrink::heatshrink_dynalloc PROPERTIES
-    IMPORTED_LOCATION "''${_hs_prefix}/lib/libheatshrink.a"
-    INTERFACE_INCLUDE_DIRECTORIES "''${_hs_prefix}/include;''${_hs_prefix}/include/heatshrink"
-  )
-endif()
-
-if(NOT TARGET heatshrink)
-  add_library(heatshrink ALIAS heatshrink::heatshrink)
-endif()
-
-set(heatshrink_FOUND TRUE)
-unset(_hs_prefix)
-HSCFG
-
-      cat > $out/lib/cmake/heatshrink/heatshrinkConfigVersion.cmake << 'HSVER'
-set(PACKAGE_VERSION "0.4.1")
-if("''${PACKAGE_FIND_VERSION}" VERSION_GREATER "''${PACKAGE_VERSION}")
-  set(PACKAGE_VERSION_COMPATIBLE FALSE)
-else()
-  set(PACKAGE_VERSION_COMPATIBLE TRUE)
-  if("''${PACKAGE_FIND_VERSION}" VERSION_EQUAL "''${PACKAGE_VERSION}")
-    set(PACKAGE_VERSION_EXACT TRUE)
-  endif()
-endif()
-HSVER
+      export EMSCRIPTEN=${emscripten}/share/emscripten
     '';
   };
 
-  libbgcode = mkEmscriptenLib {
-    pname = "libslic3r-dep-libbgcode";
-    version = "0.1.0";
-    src = sources.libbgcode;
-    usesCMake = false;
-    preBuildPhase = ''
-      export CFLAGS="-fexceptions -matomics -mbulk-memory"
-      export CXXFLAGS="-fexceptions -matomics -mbulk-memory"
+  # ---- NEW: libnoise (fuzzy skin noise generation) ----
 
-      emcmake cmake \
-        -B build \
-        -G Ninja \
-        -DCMAKE_INSTALL_PREFIX=$out \
-        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-        -DCMAKE_C_FLAGS="-fexceptions -matomics -mbulk-memory" \
-        -DCMAKE_CXX_FLAGS="-fexceptions -matomics -mbulk-memory" \
-        "-DCMAKE_PREFIX_PATH=${lib.concatStringsSep ";" [ zlib boost heatshrink ]}" \
-        "-DCMAKE_FIND_ROOT_PATH=${lib.concatStringsSep ";" [ zlib boost heatshrink ]}" \
-        -DLibBGCode_BUILD_TESTS=OFF \
-        -DLibBGCode_BUILD_CMD_TOOL=OFF \
-        -DLibBGCode_BUILD_COMPONENT_Binarize=ON \
-        -DLibBGCode_BUILD_COMPONENT_Convert=ON \
-        -DLibBGCode_BUILD_DEPS=OFF \
-        -Dheatshrink_DIR=${heatshrink}/lib/cmake/heatshrink \
-        -DZLIB_INCLUDE_DIR=${zlib}/include \
-        -DZLIB_LIBRARY=${zlib}/lib/libz.a
-      cmake --build build --parallel
-      cmake --install build
-    '';
+  libnoise = mkEmscriptenLib {
+    pname = "orcaslicer-dep-libnoise";
+    version = "1.0";
+    src = sources.libnoise;
+    cmakeFlags = [
+      "-DBUILD_SHARED_LIBS=OFF"
+    ];
   };
 
   # ============================================================
@@ -704,12 +643,13 @@ HSVER
     nanosvg eigen cereal nlohmann_json cgal
     zlib libexpat gmp mpfr boost
     oneTBB nlopt qhull
-    libpng libjpeg_turbo heatshrink libbgcode
+    libpng libjpeg_turbo
+    draco libnoise
   ];
 
 in
 symlinkJoin {
-  name = "libslic3r-deps-0.1.0";
+  name = "orcaslicer-deps-0.1.0";
   paths = allDeps;
 
   postBuild = ''
@@ -743,20 +683,20 @@ symlinkJoin {
     test -f $out/include/png.h || (echo "ERROR: libpng headers missing" && exit 1)
     test -f $out/lib/libjpeg.a || (echo "ERROR: libjpeg missing" && exit 1)
     test -f $out/include/jpeglib.h || (echo "ERROR: libjpeg headers missing" && exit 1)
-    test -f $out/lib/libheatshrink.a || (echo "ERROR: heatshrink missing" && exit 1)
-    test -d $out/include/heatshrink || (echo "ERROR: heatshrink headers missing" && exit 1)
-    test -d $out/lib/cmake/LibBGCode || test -d $out/lib/cmake/libbgcode || (echo "ERROR: LibBGCode cmake config missing" && exit 1)
     test -f $out/include/nanosvg/nanosvg.h || (echo "ERROR: nanosvg headers missing" && exit 1)
+    test -f $out/lib/libdraco.a || (echo "ERROR: draco library missing" && exit 1)
+    test -d $out/include/draco || (echo "ERROR: draco headers missing" && exit 1)
+    test -f $out/lib/libnoise.a || test -f $out/lib/liblibnoise.a || test -f $out/lib/liblibnoise_static.a || (echo "ERROR: libnoise missing" && exit 1)
 
     echo ""
     echo "========================================"
-    echo "libslic3r-deps: ALL deps built successfully"
+    echo "orcaslicer-deps: ALL deps built successfully"
     echo "========================================"
   '';
 
   meta = with lib; {
-    description = "Cross-compiled WASM dependencies for libslic3r";
-    license = with licenses; [ zlib mit bsd3 lgpl3Plus lgpl21Plus bsl11 asl20 gpl3Plus agpl3Plus libpng isc ];
+    description = "Cross-compiled WASM dependencies for OrcaSlicer's libslic3r";
+    license = with licenses; [ zlib mit bsd3 lgpl3Plus lgpl21Plus bsl11 asl20 gpl3Plus agpl3Plus libpng isc asl20 ];
     platforms = platforms.all;
   };
 }

@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 /**
- * React hook wrapping the slicer engine via a Web Worker.
+ * React hook wrapping the slicer engine via the SlicerBackend abstraction.
  *
- * Provides a lazy-initialized slicer that converts STL/3MF data to GCode.
- * The worker is created on the first slice() call and reused for subsequent calls.
- * The WASM module is loaded inside the worker (heavy, ~15-20MB).
+ * Auto-selects the best available backend (Native ARM on Android, WASM otherwise).
+ * The backend is created on the first slice() call and reused for subsequent calls.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createSlicerBackend } from '../lib/slicer-backend';
+import type { SlicerBackend } from '../lib/slicer-backend';
 
 export type SlicerStatus = 'idle' | 'loading' | 'ready' | 'slicing' | 'error';
 
@@ -35,11 +36,13 @@ export interface UseSlicerResult {
   progress: SliceProgress | null;
   /** Debug log entries (most recent last) */
   debugLog: string[];
+  /** Human-readable engine name (e.g. "WASM", "Native ARM") */
+  engineName: string;
   /**
    * Slice an STL buffer into GCode.
    * @param stlData - Binary STL data as ArrayBuffer (used for single-color)
-   * @param config - PrusaSlicer config key/value pairs
-   * @param threeMfData - Optional 3MF buffer for multi-color (PrusaSlicer handles extruder assignment from 3MF metadata)
+   * @param config - OrcaSlicer config key/value pairs
+   * @param threeMfData - Optional 3MF buffer for multi-color
    */
   slice: (
     stlData: ArrayBuffer,
@@ -54,7 +57,7 @@ export interface UseSlicerResult {
 
 /** Parse print stats from gcode comments */
 export function parseGcodeStats(gcode: string): { printTime?: number; filamentUsed?: number } {
-  // PrusaSlicer format
+  // PrusaSlicer/OrcaSlicer format
   const psTimeMatch = gcode.match(/; estimated printing time \(normal mode\) = (?:(\d+)h )?(?:(\d+)m )?(?:(\d+)s)?/);
   const psFilamentMatch = gcode.match(/; filament used \[mm\] = ([\d.]+)/);
   let printTime: number | undefined;
@@ -71,15 +74,15 @@ export function parseGcodeStats(gcode: string): { printTime?: number; filamentUs
 }
 
 /**
- * Map worker progress stages to the SliceProgress stage names used by the UI.
+ * Map backend progress stages to the SliceProgress stage names used by the UI.
  *
- * Worker stages (from slicer-worker.ts):
- *   loading, loading_model → parsing (loading WASM + parsing model data)
- *   configuring, slicing    → slicing (apply config + PrusaSlicer process)
+ * Backend stages:
+ *   loading, loading_model → parsing (loading engine + parsing model data)
+ *   configuring, slicing    → slicing (apply config + slicer process)
  *   exporting               → exporting (GCode generation)
  */
-function mapWorkerStage(workerStage: string): SliceProgress['stage'] {
-  switch (workerStage) {
+function mapStage(stage: string): SliceProgress['stage'] {
+  switch (stage) {
     case 'loading':
     case 'loading_model':
       return 'parsing';
@@ -98,9 +101,10 @@ export function useSlicer(): UseSlicerResult {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<SliceProgress | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [engineName, setEngineName] = useState<string>('WASM');
 
   const mountedRef = useRef(true);
-  const workerRef = useRef<Worker | null>(null);
+  const backendRef = useRef<SlicerBackend | null>(null);
   const pendingRef = useRef<{
     resolve: (result: SliceResult) => void;
     reject: (error: Error) => void;
@@ -111,10 +115,10 @@ export function useSlicer(): UseSlicerResult {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Terminate worker on unmount
-      if (workerRef.current) {
-        workerRef.current.terminate();
-        workerRef.current = null;
+      // Destroy backend on unmount
+      if (backendRef.current) {
+        backendRef.current.destroy();
+        backendRef.current = null;
       }
       // Reject any pending slice
       if (pendingRef.current) {
@@ -124,61 +128,16 @@ export function useSlicer(): UseSlicerResult {
     };
   }, []);
 
-  /** Create the worker lazily on first use */
-  const getWorker = useCallback((): Worker => {
-    if (workerRef.current) return workerRef.current;
+  /** Create the backend lazily on first use */
+  const getBackend = useCallback((): SlicerBackend => {
+    if (backendRef.current) return backendRef.current;
 
-    const worker = new Worker(
-      new URL('../workers/slicer-worker.ts', import.meta.url),
-      { type: 'module' },
-    );
-
-    worker.onmessage = (e: MessageEvent) => {
-      const msg = e.data;
-      if (!mountedRef.current) return;
-
-      if (msg.type === 'progress') {
-        const stage = mapWorkerStage(msg.stage);
-        setProgress({ stage, progress: msg.progress, message: msg.message });
-        const logEntry = msg.message
-          ? `[${msg.stage}] ${msg.message}`
-          : `[${msg.stage}] ${Math.round(msg.progress * 100)}%`;
-        setDebugLog(prev => [...prev, logEntry]);
-      } else if (msg.type === 'done') {
-        setStatus('ready');
-        setProgress(null);
-        const result: SliceResult = {
-          gcode: msg.gcode,
-          printTime: msg.stats?.printTime,
-          filamentUsed: msg.stats?.filamentUsed,
-        };
-        pendingRef.current?.resolve(result);
-        pendingRef.current = null;
-      } else if (msg.type === 'error') {
-        setStatus('error');
-        setError(msg.message);
-        setProgress(null);
-        setDebugLog(prev => [...prev, `ERROR: ${msg.message}`]);
-        pendingRef.current?.reject(new Error(msg.message));
-        pendingRef.current = null;
-      }
-    };
-
-    worker.onerror = (e: ErrorEvent) => {
-      if (!mountedRef.current) return;
-      const message = e.message || 'Worker crashed';
-      setStatus('error');
-      setError(message);
-      setProgress(null);
-      setDebugLog(prev => [...prev, `WORKER ERROR: ${message}`]);
-      pendingRef.current?.reject(new Error(message));
-      pendingRef.current = null;
-      // Worker is dead — clear ref so a new one is created on retry
-      workerRef.current = null;
-    };
-
-    workerRef.current = worker;
-    return worker;
+    const backend = createSlicerBackend();
+    backendRef.current = backend;
+    if (mountedRef.current) {
+      setEngineName(backend.engineName);
+    }
+    return backend;
   }, []);
 
   const slice = useCallback(async (
@@ -199,32 +158,48 @@ export function useSlicer(): UseSlicerResult {
       setDebugLog([]);
     }
 
-    const worker = getWorker();
+    const backend = getBackend();
+    const input = threeMfData || stlData;
+    const format = threeMfData ? '3mf' as const : 'stl' as const;
 
     return new Promise<SliceResult>((resolve, reject) => {
       pendingRef.current = { resolve, reject };
 
-      if (threeMfData) {
-        // Multi-color: pass the 3MF buffer directly — PrusaSlicer handles
-        // extruder assignment internally from 3MF metadata.
-        worker.postMessage(
-          { type: 'slice3mf', data: threeMfData, config: config || {} },
-          [threeMfData],
-        );
-      } else {
-        // Single-color: pass the STL buffer
-        worker.postMessage(
-          { type: 'slice', stlData, config: config || {} },
-          [stlData],
-        );
-      }
+      backend.loadAndSlice(
+        input,
+        config || {},
+        format,
+        (stage, prog, message) => {
+          if (!mountedRef.current) return;
+          const mappedStage = mapStage(stage);
+          setProgress({ stage: mappedStage, progress: prog, message });
+          const logEntry = message
+            ? `[${stage}] ${message}`
+            : `[${stage}] ${Math.round(prog * 100)}%`;
+          setDebugLog(prev => [...prev, logEntry]);
+        },
+      ).then(result => {
+        if (!mountedRef.current) return;
+        setStatus('ready');
+        setProgress(null);
+        pendingRef.current = null;
+        resolve(result);
+      }).catch(err => {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setStatus('error');
+        setError(message);
+        setProgress(null);
+        setDebugLog(prev => [...prev, `ERROR: ${message}`]);
+        pendingRef.current = null;
+        reject(err);
+      });
     });
-  }, [getWorker]);
+  }, [getBackend]);
 
   const cancel = useCallback(() => {
-    const worker = workerRef.current;
-    if (worker) {
-      worker.postMessage({ type: 'cancel' });
+    if (backendRef.current) {
+      backendRef.current.cancel();
     }
     if (mountedRef.current) {
       setStatus('idle');
@@ -237,10 +212,10 @@ export function useSlicer(): UseSlicerResult {
   }, []);
 
   const reset = useCallback(() => {
-    // Terminate the current worker so a fresh one is created on next slice
-    if (workerRef.current) {
-      workerRef.current.terminate();
-      workerRef.current = null;
+    // Destroy the current backend so a fresh one is created on next slice
+    if (backendRef.current) {
+      backendRef.current.destroy();
+      backendRef.current = null;
     }
     if (pendingRef.current) {
       pendingRef.current.reject(new Error('Slicer reset'));
@@ -252,5 +227,5 @@ export function useSlicer(): UseSlicerResult {
     setDebugLog([]);
   }, []);
 
-  return { status, error, progress, debugLog, slice, cancel, reset };
+  return { status, error, progress, debugLog, engineName, slice, cancel, reset };
 }

@@ -1120,6 +1120,37 @@ input:focus, select:focus {
   width: 100%;
 }
 
+.filament-advanced-section {
+  margin-top: 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.filament-advanced-section summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #444;
+  padding: 0.25rem 0;
+}
+
+.filament-advanced-section h4 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.filament-checkbox-field {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.filament-checkbox-field input[type="checkbox"] {
+  width: auto;
+}
+
 .filament-form-actions {
   display: flex;
   gap: 0.35rem;
@@ -1256,6 +1287,55 @@ input:focus, select:focus {
   color: #888;
   font-style: italic;
   margin: 0.25rem 0 0;
+}
+
+.print-dialog-details {
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.print-dialog-details summary {
+  cursor: pointer;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+
+.print-dialog-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.25rem 0;
+}
+
+.print-dialog-inline-row .print-dialog-field {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
+.print-dialog-inline-row .print-dialog-field input {
+  width: 100%;
+}
+
+.print-dialog-remove-btn {
+  background: transparent;
+  border: 1px solid #666;
+  color: #f66;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.print-dialog-add-btn {
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
 }
 
 .print-dialog-extruder-row {
@@ -1960,6 +2040,24 @@ input:focus, select:focus {
 
 .print-dialog-preview-loading .print-dialog-progress-bar {
   max-width: 300px;
+}
+
+.print-dialog-engine-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.print-dialog-engine-badge--wasm {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.print-dialog-engine-badge--native {
+  background: #d4edda;
+  color: #155724;
 }
 
 .print-dialog-done-info {

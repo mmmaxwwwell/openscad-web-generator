@@ -1,9 +1,16 @@
-# Stage 2: Build WASM bindings.
-# Links slicer_bindings.cpp against the pre-built libslic3r static libs
-# to produce libslic3r.js + libslic3r.wasm.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# Stage 3: Build WASM bindings for OrcaSlicer.
+# Links slicer_bindings.cpp against the pre-built OrcaSlicer libslic3r
+# static libs to produce libslic3r.js + libslic3r.wasm.
 #
 # This is the fast part — only rebuilds when src/wasm/ changes.
-# The expensive libslic3r compilation is cached in libslic3r-lib.nix.
+# The expensive OrcaSlicer compilation is cached in orcaslicer-lib.nix.
+#
+# Based on libslic3r-wasm.nix (PrusaSlicer). Changes:
+# - Uses orcaslicer-deps.nix and orcaslicer-lib.nix
+# - No LibBGCode or heatshrink
+# - Adds draco, libnoise from deps; clipper2, mcut from bundled
 { lib
 , stdenv
 , emscripten
@@ -14,16 +21,16 @@
 }:
 
 let
-  deps = callPackage ./libslic3r-deps.nix {};
-  libslic3rLib = callPackage ./libslic3r-lib.nix {};
+  deps = callPackage ./orcaslicer-deps.nix {};
+  orcaslicerLib = callPackage ./orcaslicer-lib.nix {};
 
   # Path to our WASM bindings source (slicer_bindings.cpp + CMakeLists.txt)
   bindingsSrc = ../src/wasm;
 
 in
 stdenv.mkDerivation {
-  pname = "libslic3r-wasm";
-  version = "2.9.4";
+  pname = "orcaslicer-wasm";
+  version = "2.3.1";
 
   src = bindingsSrc;
 
@@ -50,7 +57,7 @@ stdenv.mkDerivation {
 
     # Ensure exception handling and atomics flags reach every compile command
     # -matomics -mbulk-memory: needed for C++ atomics without full pthreads
-    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory"
+    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT"
 
     # ============================================================
     # BUILD WASM BINDINGS
@@ -64,7 +71,7 @@ stdenv.mkDerivation {
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DCMAKE_CXX_COMPILER=em++ \
       -DCMAKE_C_COMPILER=emcc \
-      -DLIBSLIC3R_PREFIX=${libslic3rLib} \
+      -DLIBSLIC3R_PREFIX=${orcaslicerLib} \
       -DDEPS_PREFIX=${deps}
 
     cmake --build . --parallel
@@ -90,7 +97,7 @@ stdenv.mkDerivation {
 
     echo ""
     echo "========================================"
-    echo "libslic3r-wasm: Build successful"
+    echo "orcaslicer-wasm: Build successful"
     echo "========================================"
     echo "WASM artifacts:"
     ls -lh $out/libslic3r.*
@@ -99,8 +106,8 @@ stdenv.mkDerivation {
   '';
 
   meta = with lib; {
-    description = "PrusaSlicer's libslic3r compiled to WASM via emscripten";
-    homepage = "https://github.com/prusa3d/PrusaSlicer";
+    description = "OrcaSlicer's libslic3r compiled to WASM via Emscripten";
+    homepage = "https://github.com/SoftFever/OrcaSlicer";
     license = licenses.agpl3Plus;
     platforms = platforms.all;
   };

@@ -1,12 +1,12 @@
-name: Build Slicer WASM
+name: Build OrcaSlicer WASM
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag for the built artifacts (e.g. slicer-wasm-v0.1.0)'
+        description: 'Release tag for the built artifacts (e.g. orcaslicer-wasm-v0.1.0)'
         required: true
-        default: 'slicer-wasm-v0.1.0'
+        default: 'orcaslicer-wasm-v0.1.0'
 
 permissions:
   contents: write
@@ -25,8 +25,8 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build libslic3r WASM via Nix
-        run: nix build .#libslic3r-wasm --print-build-logs
+      - name: Build OrcaSlicer WASM via Nix
+        run: nix build .#orcaslicer-wasm --print-build-logs
 
       - name: Verify build output
         run: |
@@ -39,11 +39,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
-          name: "Slicer WASM ${{ github.event.inputs.tag }}"
+          name: "OrcaSlicer WASM ${{ github.event.inputs.tag }}"
           body: |
-            Pre-built libslic3r WASM artifacts.
+            Pre-built OrcaSlicer libslic3r WASM artifacts.
 
-            Built from commit ${{ github.sha }} via `nix build .#libslic3r-wasm`.
+            Built from commit ${{ github.sha }} via `nix build .#orcaslicer-wasm`.
 
             These artifacts are downloaded automatically by the deploy workflow
             and by `scripts/download-slicer-wasm.mjs`.

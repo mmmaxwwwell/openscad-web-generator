@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # CMakeLists.txt for the WASM slicer bindings.
-# Links slicer_bindings.cpp against libslic3r.a + all dependencies
+# Links slicer_bindings.cpp against OrcaSlicer's libslic3r.a + all dependencies
 # and produces libslic3r.js + libslic3r.wasm via Emscripten.
 #
 # Usage (from the Nix build):
 #   emcmake cmake -S . -B build \
-#     -DLIBSLIC3R_PREFIX=/path/to/libslic3r-wasm-install \
-#     -DDEPS_PREFIX=/path/to/libslic3r-deps-install
+#     -DLIBSLIC3R_PREFIX=/path/to/orcaslicer-lib-install \
+#     -DDEPS_PREFIX=/path/to/orcaslicer-deps-install
 #   cmake --build build
 
 cmake_minimum_required(VERSION 3.13)
@@ -16,8 +16,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Prefixes for finding pre-built libraries
-# LIBSLIC3R_PREFIX: output of libslic3r-wasm.nix (libslic3r.a, headers, bundled deps)
-# DEPS_PREFIX: output of libslic3r-deps.nix (boost, tbb, zlib, etc.)
+# LIBSLIC3R_PREFIX: output of orcaslicer-lib.nix (libslic3r.a, headers, bundled deps)
+# DEPS_PREFIX: output of orcaslicer-deps.nix (boost, tbb, zlib, draco, libnoise, etc.)
 if(NOT DEFINED LIBSLIC3R_PREFIX)
     message(FATAL_ERROR "LIBSLIC3R_PREFIX must be set to the libslic3r install prefix")
 endif()
@@ -31,10 +31,6 @@ endif()
 include_directories(
     ${LIBSLIC3R_PREFIX}/include
     ${DEPS_PREFIX}/include
-    # LibBGCode headers use relative includes like "binarize/export.h" from
-    # within include/LibBGCode/binarize/binarize.hpp, so we need the
-    # LibBGCode subdirectory on the include path as well.
-    ${DEPS_PREFIX}/include/LibBGCode
 )
 
 # ============================================================
@@ -51,11 +47,40 @@ if(NOT EXISTS ${LIBSLIC3R_CGAL})
     message(FATAL_ERROR "liblibslic3r_cgal.a not found at ${LIBSLIC3R_CGAL}")
 endif()
 
-# Bundled deps (built as part of PrusaSlicer) — set paths directly
+# Bundled deps (built as part of OrcaSlicer from deps_src/) — set paths directly
 set(LIB_ADMESH ${LIBSLIC3R_PREFIX}/lib/libadmesh.a)
 set(LIB_CLIPPER ${LIBSLIC3R_PREFIX}/lib/libclipper.a)
 set(LIB_GLU_LIBTESS ${LIBSLIC3R_PREFIX}/lib/libglu-libtess.a)
 set(LIB_SEMVER ${LIBSLIC3R_PREFIX}/lib/libsemver.a)
+
+# Clipper2 — OrcaSlicer's polygon clipping library (replaces parts of legacy Clipper)
+set(LIB_CLIPPER2_PATH ${LIBSLIC3R_PREFIX}/lib/libclipper2.a)
+if(NOT EXISTS ${LIB_CLIPPER2_PATH})
+    # Try alternate names — OrcaSlicer's deps_src/clipper2 might produce different names
+    set(LIB_CLIPPER2_PATH ${LIBSLIC3R_PREFIX}/lib/libClipper2.a)
+endif()
+if(NOT EXISTS ${LIB_CLIPPER2_PATH})
+    set(LIB_CLIPPER2_PATH ${LIBSLIC3R_PREFIX}/lib/libClipper2Lib.a)
+endif()
+if(EXISTS ${LIB_CLIPPER2_PATH})
+    set(LIB_CLIPPER2 ${LIB_CLIPPER2_PATH})
+else()
+    message(STATUS "Clipper2 .a not found — may be header-only or compiled into libslic3r")
+    set(LIB_CLIPPER2 "")
+endif()
+
+# mcut — mesh cutting library (bundled in deps_src/mcut/)
+set(LIB_MCUT_PATH ${LIBSLIC3R_PREFIX}/lib/libmcut.a)
+if(NOT EXISTS ${LIB_MCUT_PATH})
+    set(LIB_MCUT_PATH ${LIBSLIC3R_PREFIX}/lib/libMCUT.a)
+endif()
+if(EXISTS ${LIB_MCUT_PATH})
+    set(LIB_MCUT ${LIB_MCUT_PATH})
+else()
+    message(STATUS "mcut .a not found — may be compiled into libslic3r or not needed")
+    set(LIB_MCUT "")
+endif()
+
 set(LIB_AGG_PATH ${LIBSLIC3R_PREFIX}/lib/libagg.a)
 if(EXISTS ${LIB_AGG_PATH})
     set(LIB_AGG ${LIB_AGG_PATH})
@@ -72,11 +97,8 @@ else()
 endif()
 
 # miniz may be built as a separate static lib or compiled into libslic3r directly
-# PrusaSlicer's bundled miniz creates a target named "miniz_static" -> libminiz_static.a
-# LocalesUtils (bundled in PrusaSlicer for locale-safe number formatting)
 set(LIB_LOCALESUTILS_PATH ${LIBSLIC3R_PREFIX}/lib/liblocalesutils.a)
 if(NOT EXISTS ${LIB_LOCALESUTILS_PATH})
-    # Try alternate naming
     set(LIB_LOCALESUTILS_PATH ${LIBSLIC3R_PREFIX}/lib/libLocalesUtils.a)
 endif()
 if(EXISTS ${LIB_LOCALESUTILS_PATH})
@@ -88,7 +110,6 @@ endif()
 
 set(LIB_MINIZ_PATH ${LIBSLIC3R_PREFIX}/lib/libminiz_static.a)
 if(NOT EXISTS ${LIB_MINIZ_PATH})
-    # Fall back to libminiz.a in case the target name differs
     set(LIB_MINIZ_PATH ${LIBSLIC3R_PREFIX}/lib/libminiz.a)
 endif()
 if(EXISTS ${LIB_MINIZ_PATH})
@@ -97,7 +118,7 @@ else()
     message(FATAL_ERROR "Neither libminiz_static.a nor libminiz.a found in ${LIBSLIC3R_PREFIX}/lib/ — miniz is required for 3MF support")
 endif()
 
-# External deps (from libslic3r-deps.nix) — set paths directly
+# External deps (from orcaslicer-deps.nix) — set paths directly
 set(LIB_BOOST_SYSTEM ${DEPS_PREFIX}/lib/libboost_system.a)
 set(LIB_BOOST_FILESYSTEM ${DEPS_PREFIX}/lib/libboost_filesystem.a)
 set(LIB_BOOST_THREAD ${DEPS_PREFIX}/lib/libboost_thread.a)
@@ -120,10 +141,25 @@ set(LIB_QHULL_CPP ${DEPS_PREFIX}/lib/libqhullcpp.a)
 set(LIB_QHULL_R ${DEPS_PREFIX}/lib/libqhullstatic_r.a)
 set(LIB_PNG ${DEPS_PREFIX}/lib/libpng.a)
 set(LIB_JPEG ${DEPS_PREFIX}/lib/libjpeg.a)
-set(LIB_BGCODE_CORE ${DEPS_PREFIX}/lib/libbgcode_core.a)
-set(LIB_BGCODE_BINARIZE ${DEPS_PREFIX}/lib/libbgcode_binarize.a)
-set(LIB_BGCODE_CONVERT ${DEPS_PREFIX}/lib/libbgcode_convert.a)
-set(LIB_HEATSHRINK ${DEPS_PREFIX}/lib/libheatshrink.a)
+
+# Draco — mesh compression (new for OrcaSlicer)
+set(LIB_DRACO ${DEPS_PREFIX}/lib/libdraco.a)
+
+# libnoise — fuzzy skin noise generation (new for OrcaSlicer)
+# The library may be named libnoise.a or liblibnoise.a depending on CMake target name
+set(LIB_LIBNOISE_PATH ${DEPS_PREFIX}/lib/libnoise.a)
+if(NOT EXISTS ${LIB_LIBNOISE_PATH})
+    set(LIB_LIBNOISE_PATH ${DEPS_PREFIX}/lib/liblibnoise.a)
+endif()
+if(NOT EXISTS ${LIB_LIBNOISE_PATH})
+    set(LIB_LIBNOISE_PATH ${DEPS_PREFIX}/lib/liblibnoise_static.a)
+endif()
+if(EXISTS ${LIB_LIBNOISE_PATH})
+    set(LIB_LIBNOISE ${LIB_LIBNOISE_PATH})
+else()
+    message(STATUS "libnoise .a not found — fuzzy skin noise may not be available")
+    set(LIB_LIBNOISE "")
+endif()
 
 # ============================================================
 # Build the WASM binding
@@ -135,6 +171,7 @@ target_compile_options(libslic3r PRIVATE
     -matomics
     -mbulk-memory
     -DBOOST_LOG_NO_THREADS
+    -Wno-c++11-narrowing
 )
 
 # Collect all libraries in link order (dependents first)
@@ -163,10 +200,7 @@ target_link_libraries(libslic3r PRIVATE
     ${LIB_BOOST_NOWIDE}
     ${LIB_BOOST_SYSTEM}
     ${LIB_TBB}
-    ${LIB_BGCODE_CONVERT}
-    ${LIB_BGCODE_BINARIZE}
-    ${LIB_BGCODE_CORE}
-    ${LIB_HEATSHRINK}
+    ${LIB_DRACO}
     ${LIB_NLOPT}
     ${LIB_QHULL_CPP}
     ${LIB_QHULL_R}
@@ -178,12 +212,22 @@ target_link_libraries(libslic3r PRIVATE
     ${LIB_GMP}
 )
 
+# Link Clipper2 if it exists as a separate library
+if(LIB_CLIPPER2)
+    target_link_libraries(libslic3r PRIVATE ${LIB_CLIPPER2})
+endif()
+
+# Link mcut if it exists as a separate library
+if(LIB_MCUT)
+    target_link_libraries(libslic3r PRIVATE ${LIB_MCUT})
+endif()
+
 # Link AGG separately if it exists (not needed for FDM-only builds)
 if(LIB_AGG)
     target_link_libraries(libslic3r PRIVATE ${LIB_AGG})
 endif()
 
-# Link libnest2d separately if it exists (it's an INTERFACE/header-only library in PrusaSlicer)
+# Link libnest2d separately if it exists (may be header-only INTERFACE library)
 if(LIB_LIBNEST2D)
     target_link_libraries(libslic3r PRIVATE ${LIB_LIBNEST2D})
 endif()
@@ -198,6 +242,11 @@ if(LIB_LOCALESUTILS)
     target_link_libraries(libslic3r PRIVATE ${LIB_LOCALESUTILS})
 endif()
 
+# Link libnoise separately if it exists
+if(LIB_LIBNOISE)
+    target_link_libraries(libslic3r PRIVATE ${LIB_LIBNOISE})
+endif()
+
 # ============================================================
 # Emscripten link flags
 # ============================================================
@@ -209,9 +258,10 @@ set_target_properties(libslic3r PROPERTIES
         -sMODULARIZE=1 \
         -sEXPORT_NAME=createSlicerModule \
         -sENVIRONMENT=worker \
-        -sMAXIMUM_MEMORY=1073741824 \
+        -sMAXIMUM_MEMORY=4294967296 \
         -sINITIAL_MEMORY=268435456 \
         -sALLOW_MEMORY_GROWTH=1 \
+        -sSTACK_SIZE=8388608 \
         -sNO_EXIT_RUNTIME=1 \
         -sFORCE_FILESYSTEM=1 \
         -sEXPORTED_RUNTIME_METHODS=['getExceptionMessage','FS'] \

@@ -18,10 +18,12 @@
           buildToolsVersions = [ "34.0.0" "35.0.0" ];
           platformVersions = [ "35" ];
           includeEmulator = false;
-          includeNDK = false;
+          includeNDK = true;
+          ndkVersions = [ "26.1.10909125" ];
           includeSources = false;
           includeSystemImages = false;
         };
+        androidNdkPath = "${androidSdk.androidsdk}/libexec/android-sdk/ndk/26.1.10909125";
       in
       {
         devShells.default = pkgs.mkShell {
@@ -39,19 +41,37 @@
         };
 
         packages.openscad-wasm = pkgs.callPackage ./nix/openscad-wasm.nix {};
-        packages.libslic3r-deps = pkgs.callPackage ./nix/libslic3r-deps.nix {};
-        packages.libslic3r-lib = pkgs.callPackage ./nix/libslic3r-lib.nix {};
-        packages.libslic3r-wasm = pkgs.callPackage ./nix/libslic3r-wasm.nix {};
+        packages.orcaslicer-deps = pkgs.callPackage ./nix/orcaslicer-deps.nix {};
+        packages.orcaslicer-lib = pkgs.callPackage ./nix/orcaslicer-lib.nix {};
+        packages.orcaslicer-wasm = pkgs.callPackage ./nix/orcaslicer-wasm.nix {};
+        packages.orcaslicer-android-arm64 = pkgs.callPackage ./nix/orcaslicer-android.nix {
+          androidNdk = androidNdkPath;
+          androidAbi = "arm64-v8a";
+        };
+        packages.orcaslicer-android-arm32 = pkgs.callPackage ./nix/orcaslicer-android.nix {
+          androidNdk = androidNdkPath;
+          androidAbi = "armeabi-v7a";
+        };
 
-        packages.default = pkgs.buildNpmPackage {
+        packages.default = pkgs.buildNpmPackage rec {
           pname = "openscad-web-generator";
           version = "0.1.0";
           src = ./.;
 
           npmDepsHash = "sha256-bdV2QOLNFT2cX5XbULzes3pGjUeylSdWCPz4OdNV710=";
 
+          # Pre-populate slicer WASM from Nix-built package (no network in sandbox)
+          orcaslicerWasm = self.packages.${system}.orcaslicer-wasm;
+
+          preBuild = ''
+            mkdir -p public/wasm
+            for f in ${orcaslicerWasm}/*; do
+              cp "$f" public/wasm/
+            done
+          '';
+
           buildPhase = ''
-            node scripts/build.mjs --skip-wasm
+            node scripts/build.mjs --skip-wasm --skip-slicer
           '';
 
           installPhase = ''

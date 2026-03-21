@@ -82,10 +82,16 @@ async function handleSlice(
     self.postMessage({ type: 'done', gcode, stats });
   } catch (err) {
     if (!cancelled) {
-      self.postMessage({
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
+      let message: string;
+      if (err instanceof Error) {
+        message = err.message;
+      } else if (typeof err === 'number') {
+        // Raw WASM exception pointer — try to decode it
+        message = `WASM exception (ptr=${err}). A config key or value may be invalid.`;
+      } else {
+        message = String(err);
+      }
+      self.postMessage({ type: 'error', message });
     }
   } finally {
     // Clean up the engine instance to free C++ memory

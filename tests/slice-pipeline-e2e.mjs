@@ -1,0 +1,464 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: AGPL-3.0-or-later
+/**
+ * E2E Integration Test: Full OpenSCAD → STL → Slicer → GCode Pipeline
+ *
+ * Tests the complete workflow:
+ *   1. Load the app
+ *   2. Load the cube_1cm.scad example
+ *   3. Render STL via OpenSCAD WASM
+ *   4. Open the print dialog
+ *   5. Slice the STL via libslic3r WASM
+ *   6. Download and validate the GCode output
+ *
+ * Exit codes:
+ *   0 = all checks passed
+ *   1 = test failure (validation failed or pipeline error)
+ *   2 = infrastructure error (server/browser failed to start)
+ *
+ * Output format (structured for AI agent parsing):
+ *   [STEP]       — test progress
+ *   [OK]         — check passed
+ *   [FAIL]       — check failed
+ *   [ERROR]      — infrastructure error
+ *   [GCODE]      — GCode analysis
+ *   [CONSOLE]    — browser console message
+ *   [DIAG]       — diagnostic info
+ *   [SCREENSHOT] — screenshot saved
+ *   [RESULT]     — final JSON summary
+ */
+
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, '..');
+const OUTPUT_DIR = resolve(PROJECT_ROOT, 'test-output');
+
+// Timeouts
+const TIMEOUT_PAGE_LOAD = 30_000;
+const TIMEOUT_RENDER = 120_000;   // OpenSCAD WASM load + render
+const TIMEOUT_SLICE = 300_000;    // Slicer WASM load + slice (can be slow first time)
+
+if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function log(tag, msg) {
+  const ts = new Date().toISOString().slice(11, 23);
+  console.log(`[${tag}] ${ts} ${msg}`);
+}
+
+async function screenshot(page, name) {
+  const path = resolve(OUTPUT_DIR, `${name}.png`);
+  await page.screenshot({ path, fullPage: true });
+  log('SCREENSHOT', path);
+  return path;
+}
+
+// ---------------------------------------------------------------------------
+// GCode Validation
+// ---------------------------------------------------------------------------
+
+function validateGCode(gcode) {
+  const lines = gcode.split('\n');
+  const checks = [];
+  let allPassed = true;
+
+  function check(name, passed, detail) {
+    checks.push({ name, passed, detail });
+    if (!passed) allPassed = false;
+  }
+
+  // 1. Minimum content
+  check('has_content', lines.length > 50, `${lines.length} lines`);
+
+  // 2. G0/G1 move commands
+  const moves = lines.filter(l => /^G[01]\s/.test(l));
+  check('has_moves', moves.length > 10, `${moves.length} G0/G1 commands`);
+
+  // 3. Extrusion (E parameter on G1)
+  const extrusions = lines.filter(l => /^G1\s.*E[\d.]+/.test(l));
+  check('has_extrusion', extrusions.length > 0, `${extrusions.length} extrusion moves`);
+
+  // 4. Layer changes
+  const layerComments = lines.filter(l => /^;LAYER_CHANGE/.test(l));
+  const zMoves = lines.filter(l => /^G[01]\s.*Z[\d.]+/.test(l));
+  check('has_layers', layerComments.length > 0 || zMoves.length > 0,
+    `${layerComments.length} layer comments, ${zMoves.length} Z moves`);
+
+  // 5. Z range appropriate for 10mm cube
+  const zValues = [];
+  for (const l of lines) {
+    const m = l.match(/;Z:([\d.]+)/);
+    if (m) zValues.push(parseFloat(m[1]));
+  }
+  if (zValues.length === 0) {
+    for (const l of lines) {
+      const m = l.match(/^G[01]\s.*Z([\d.]+)/);
+      if (m) zValues.push(parseFloat(m[1]));
+    }
+  }
+  const maxZ = zValues.length > 0 ? Math.max(...zValues) : 0;
+  const minZ = zValues.length > 0 ? Math.min(...zValues) : 0;
+  check('z_range_reasonable', maxZ >= 4 && maxZ <= 15,
+    `Z: ${minZ.toFixed(2)} - ${maxZ.toFixed(2)}mm (expected ~10mm for 1cm cube)`);
+
+  // 6. Temperature commands (M104/M109 hotend, M140/M190 bed)
+  const tempLines = lines.filter(l => /^M1[04][049]\s/.test(l));
+  check('has_temperature', tempLines.length > 0, `${tempLines.length} temp commands`);
+
+  // 7. Fan commands (M106/M107)
+  const fanLines = lines.filter(l => /^M10[67]\s/.test(l));
+  check('has_fan_commands', fanLines.length > 0, `${fanLines.length} fan commands`);
+
+  // 8. Layer count reasonable for 10mm cube at 0.2mm layer height (~50 layers)
+  const layerCount = layerComments.length || zValues.length;
+  check('layer_count_reasonable', layerCount >= 10 && layerCount <= 200,
+    `${layerCount} layers (expected ~50 for 10mm at 0.2mm)`);
+
+  // 9. Has homing (G28) or Klipper START_PRINT macro (which handles homing)
+  const hasHoming = lines.some(l => /^G28/.test(l));
+  const hasStartPrint = lines.some(l => /START_PRINT/.test(l));
+  check('has_homing_or_start', hasHoming || hasStartPrint,
+    hasHoming ? 'G28 found' : hasStartPrint ? 'START_PRINT macro found (handles homing)' : 'No homing command');
+
+  // 10. Slicer signature (OrcaSlicer/PrusaSlicer)
+  const hasSignature = lines.some(l => /generated by|slic3r_pe_|OrcaSlicer/i.test(l));
+  check('has_slicer_signature', hasSignature,
+    hasSignature ? 'Found slicer signature' : 'No slicer signature');
+
+  // Parse stats
+  const timeMatch = gcode.match(/; estimated printing time \(normal mode\) = (.+)/);
+  const filamentMatch = gcode.match(/; filament used \[mm\] = ([\d.]+)/);
+
+  return {
+    passed: allPassed,
+    checks,
+    stats: {
+      totalLines: lines.length,
+      moveCommands: moves.length,
+      extrusionMoves: extrusions.length,
+      layerChanges: layerComments.length,
+      zRange: { min: minZ, max: maxZ },
+      estimatedTime: timeMatch?.[1] ?? null,
+      filamentUsedMm: filamentMatch ? parseFloat(filamentMatch[1]) : null,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Main test
+// ---------------------------------------------------------------------------
+
+async function runTest() {
+  let server = null;
+  let browser = null;
+  let exitCode = 0;
+  const consoleLogs = [];
+  const diagnostics = {};
+
+  try {
+    // ─── Start Vite Dev Server ───────────────────────────
+    log('STEP', 'Starting Vite dev server...');
+    server = await createServer({
+      root: PROJECT_ROOT,
+      server: {
+        port: 0,
+        strictPort: false,
+        headers: {
+          'Cross-Origin-Opener-Policy': 'same-origin',
+          'Cross-Origin-Embedder-Policy': 'require-corp',
+        },
+      },
+    });
+    await server.listen();
+    const addr = server.httpServer.address();
+    const baseUrl = `http://localhost:${addr.port}/openscad-web-generator/`;
+    log('OK', `Dev server at ${baseUrl}`);
+    diagnostics.serverUrl = baseUrl;
+
+    // ─── Launch Browser ──────────────────────────────────
+    log('STEP', 'Launching Chromium...');
+    const chromiumPath = process.env.CHROMIUM_PATH || '/run/current-system/sw/bin/google-chrome-stable';
+    browser = await chromium.launch({
+      headless: true,
+      executablePath: chromiumPath,
+      args: ['--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+    });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    // Collect console messages
+    page.on('console', (msg) => {
+      const entry = `[${msg.type()}] ${msg.text()}`;
+      consoleLogs.push(entry);
+      if (msg.type() === 'error') log('CONSOLE', entry);
+    });
+    page.on('pageerror', (err) => {
+      consoleLogs.push(`[pageerror] ${err.message}`);
+      log('CONSOLE', `[pageerror] ${err.message}`);
+    });
+    log('OK', 'Browser launched');
+
+    // ─── Step 1: Inject test state and navigate ──────────
+    log('STEP', '1/8 Injecting test printer + loading example via URL...');
+    await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_PAGE_LOAD });
+
+    // Accept disclaimer + inject a fake printer so "Send to Printer" is available
+    await page.evaluate(() => {
+      localStorage.setItem('disclaimer-accepted', 'true');
+      localStorage.setItem('moonraker-printers', JSON.stringify([{
+        id: 'test-e2e',
+        name: 'E2E Test Printer',
+        address: 'http://localhost:0',
+        profileId: 'ender3-s1',
+        nozzleDiameter: 0.4,
+      }]));
+    });
+
+    // Navigate to example
+    await page.goto(`${baseUrl}?example=cube_1cm.scad`, {
+      waitUntil: 'domcontentloaded',
+      timeout: TIMEOUT_PAGE_LOAD,
+    });
+    log('OK', 'App loaded with cube_1cm.scad example');
+
+    // ─── Step 2: Wait for editor screen ──────────────────
+    log('STEP', '2/8 Waiting for editor...');
+    try {
+      await page.locator('.export-controls').waitFor({ timeout: 10_000 });
+      log('OK', 'Editor loaded');
+    } catch {
+      await screenshot(page, 'step2-no-editor');
+      throw new Error('Editor screen did not appear');
+    }
+
+    // ─── Step 3: Render STL ──────────────────────────────
+    log('STEP', '3/8 Rendering STL via OpenSCAD WASM...');
+    const stlRenderBtn = page.locator('.export-render-btn').first();
+    await stlRenderBtn.click();
+
+    const renderStart = Date.now();
+    try {
+      await stlRenderBtn.filter({ hasText: /Re-render/ }).waitFor({ timeout: TIMEOUT_RENDER });
+      const renderMs = Date.now() - renderStart;
+      log('OK', `STL rendered in ${(renderMs / 1000).toFixed(1)}s`);
+      diagnostics.renderTimeMs = renderMs;
+    } catch {
+      const renderMs = Date.now() - renderStart;
+      diagnostics.renderTimeMs = renderMs;
+
+      const errorEl = page.locator('.export-error');
+      if (await errorEl.isVisible().catch(() => false)) {
+        const errText = await errorEl.textContent().catch(() => 'unknown');
+        diagnostics.renderError = errText;
+        await screenshot(page, 'step3-render-error');
+        throw new Error(`Render failed: ${errText}`);
+      }
+      await screenshot(page, 'step3-render-timeout');
+      throw new Error(`Render timed out after ${(renderMs / 1000).toFixed(1)}s`);
+    }
+
+    // ─── Step 4: Open Print Dialog ───────────────────────
+    log('STEP', '4/8 Opening print dialog...');
+    const sendBtn = page.locator('.send-to-printer-btn').first();
+    await sendBtn.click();
+
+    // Click the printer option in the dropdown
+    const printerOption = page.locator('.send-to-printer-option').first();
+    try {
+      await printerOption.waitFor({ timeout: 3000 });
+      await printerOption.click();
+    } catch {
+      log('DIAG', 'No dropdown — dialog may have opened directly');
+    }
+
+    try {
+      await page.locator('.print-dialog').waitFor({ timeout: 10_000 });
+      log('OK', 'Print dialog opened');
+    } catch {
+      await screenshot(page, 'step4-no-print-dialog');
+      throw new Error('Print dialog did not appear');
+    }
+
+    // ─── Step 5: Check cross-origin isolation ────────────
+    log('STEP', '5/8 Checking SharedArrayBuffer support...');
+    const coiStatus = await page.evaluate(() => ({
+      crossOriginIsolated: self.crossOriginIsolated,
+      hasSharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+    }));
+    diagnostics.coi = coiStatus;
+    if (coiStatus.crossOriginIsolated && coiStatus.hasSharedArrayBuffer) {
+      log('OK', 'Cross-origin isolated, SharedArrayBuffer available');
+    } else {
+      log('FAIL', `COI: ${JSON.stringify(coiStatus)} — slicer pthreads may fail`);
+    }
+
+    // ─── Step 6: Click Slice ─────────────────────────────
+    log('STEP', '6/8 Starting slicing...');
+    const sliceBtn = page.locator('.print-dialog-slice-btn');
+    await sliceBtn.waitFor({ timeout: 5000 });
+
+    // Wait for button to be enabled
+    if (await sliceBtn.isDisabled()) {
+      await page.waitForFunction(() => {
+        const btn = document.querySelector('.print-dialog-slice-btn');
+        return btn && !btn.disabled;
+      }, { timeout: 15_000 });
+    }
+    await sliceBtn.click();
+    log('OK', 'Slice button clicked');
+
+    // ─── Step 7: Wait for slicing to complete ────────────
+    log('STEP', '7/8 Waiting for slicing to complete...');
+    const sliceStart = Date.now();
+
+    // Poll progress for logging
+    const progressInterval = setInterval(async () => {
+      try {
+        const progressText = await page.locator('.print-dialog-progress-label').textContent().catch(() => null);
+        const detailText = await page.locator('.print-dialog-progress-detail').textContent().catch(() => null);
+        if (progressText) {
+          const elapsed = ((Date.now() - sliceStart) / 1000).toFixed(0);
+          log('DIAG', `[${elapsed}s] ${progressText}${detailText ? ' — ' + detailText : ''}`);
+        }
+      } catch { /* page may be navigating */ }
+    }, 5000);
+
+    try {
+      const result = await page.waitForFunction(() => {
+        const doneBtn = document.querySelector('.print-dialog-download-btn');
+        if (doneBtn) return 'done';
+        const errEl = document.querySelector('.print-dialog-error-detail');
+        if (errEl) return 'error';
+        return null;
+      }, null, { timeout: TIMEOUT_SLICE });
+
+      clearInterval(progressInterval);
+      const sliceMs = Date.now() - sliceStart;
+      diagnostics.sliceTimeMs = sliceMs;
+
+      const outcome = await result.jsonValue();
+      if (outcome === 'error') {
+        const errText = await page.locator('.print-dialog-error-detail').textContent().catch(() => 'unknown');
+        diagnostics.slicerError = errText;
+
+        // Capture debug log from the page
+        const debugLog = await page.evaluate(() => {
+          const els = document.querySelectorAll('.print-dialog-debug-log pre, .print-dialog pre');
+          return Array.from(els).map(e => e.textContent).join('\n');
+        });
+        if (debugLog) diagnostics.slicerDebugLog = debugLog;
+
+        await screenshot(page, 'step7-slice-error');
+        throw new Error(`Slicing failed after ${(sliceMs / 1000).toFixed(1)}s: ${errText}`);
+      }
+
+      log('OK', `Slicing complete in ${(sliceMs / 1000).toFixed(1)}s`);
+    } catch (err) {
+      clearInterval(progressInterval);
+      if (err.message.includes('Slicing failed')) throw err;
+
+      const elapsed = (Date.now() - sliceStart) / 1000;
+      const progress = await page.locator('.print-dialog-progress-label').textContent().catch(() => 'unknown');
+      diagnostics.sliceProgress = progress;
+      await screenshot(page, 'step7-slice-timeout');
+      throw new Error(`Slice timed out after ${elapsed.toFixed(1)}s. Progress: ${progress}`);
+    }
+
+    // ─── Step 8: Extract and validate GCode ──────────────
+    log('STEP', '8/8 Extracting and validating GCode...');
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 10_000 }),
+      page.locator('.print-dialog-download-btn').click(),
+    ]);
+
+    const downloadPath = resolve(OUTPUT_DIR, 'pipeline-cube.gcode');
+    await download.saveAs(downloadPath);
+    const gcode = readFileSync(downloadPath, 'utf-8');
+
+    if (!gcode || gcode.length < 100) {
+      throw new Error(`GCode too small: ${gcode?.length ?? 0} bytes`);
+    }
+    log('OK', `GCode extracted: ${(gcode.length / 1024).toFixed(1)} KB`);
+
+    // Validate
+    const validation = validateGCode(gcode);
+    for (const c of validation.checks) {
+      log(c.passed ? 'OK' : 'FAIL', `  ${c.name}: ${c.detail}`);
+    }
+
+    // Stats
+    log('GCODE', `Lines: ${validation.stats.totalLines}`);
+    log('GCODE', `Moves: ${validation.stats.moveCommands}`);
+    log('GCODE', `Extrusions: ${validation.stats.extrusionMoves}`);
+    log('GCODE', `Layers: ${validation.stats.layerChanges}`);
+    log('GCODE', `Z: ${validation.stats.zRange.min.toFixed(2)}-${validation.stats.zRange.max.toFixed(2)}mm`);
+    if (validation.stats.estimatedTime) log('GCODE', `Time: ${validation.stats.estimatedTime}`);
+    if (validation.stats.filamentUsedMm) log('GCODE', `Filament: ${validation.stats.filamentUsedMm.toFixed(1)}mm`);
+
+    // First 30 lines for inspection
+    log('GCODE', '--- First 30 lines ---');
+    for (const line of gcode.split('\n').slice(0, 30)) {
+      log('GCODE', line);
+    }
+    log('GCODE', '--- End preview ---');
+
+    if (!validation.passed) {
+      exitCode = 1;
+      log('FAIL', 'GCode validation failed');
+    } else {
+      log('OK', 'All GCode checks passed');
+    }
+
+  } catch (err) {
+    if (exitCode === 0) exitCode = err.message.includes('infrastructure') ? 2 : 1;
+    log('ERROR', err.message);
+    diagnostics.error = err.message;
+    diagnostics.stack = err.stack;
+  } finally {
+    // Dump browser console (last 100 entries)
+    if (consoleLogs.length > 0) {
+      log('DIAG', `--- Browser console (${consoleLogs.length} messages) ---`);
+      for (const entry of consoleLogs.slice(-100)) {
+        log('CONSOLE', entry);
+      }
+    }
+
+    // Write full console log
+    const consoleLogPath = resolve(OUTPUT_DIR, 'pipeline-browser-console.log');
+    writeFileSync(consoleLogPath, consoleLogs.join('\n'));
+
+    // Write diagnostics JSON
+    diagnostics.consoleLogs = consoleLogs;
+    diagnostics.exitCode = exitCode;
+    const diagPath = resolve(OUTPUT_DIR, 'pipeline-diagnostics.json');
+    writeFileSync(diagPath, JSON.stringify(diagnostics, null, 2));
+    log('DIAG', `Diagnostics: ${diagPath}`);
+
+    log('RESULT', JSON.stringify({
+      passed: exitCode === 0,
+      exitCode,
+      gcodeFile: exitCode === 0 ? resolve(OUTPUT_DIR, 'pipeline-cube.gcode') : null,
+      diagnosticsFile: diagPath,
+      error: diagnostics.error || null,
+      slicerError: diagnostics.slicerError || null,
+      renderTimeMs: diagnostics.renderTimeMs || null,
+      sliceTimeMs: diagnostics.sliceTimeMs || null,
+    }));
+
+    if (browser) try { await browser.close(); } catch { /* ignore */ }
+    if (server) try { await server.close(); } catch { /* ignore */ }
+  }
+
+  process.exit(exitCode);
+}
+
+runTest();

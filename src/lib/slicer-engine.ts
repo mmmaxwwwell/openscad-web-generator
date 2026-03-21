@@ -63,7 +63,7 @@ export interface SlicerEngine {
   loadSTL(buffer: ArrayBuffer | Uint8Array): void;
   /** Load a 3MF model from binary data (multi-color extruder assignments preserved) */
   load3MF(buffer: ArrayBuffer | Uint8Array): void;
-  /** Set PrusaSlicer config entries (key=value pairs in .ini format) */
+  /** Set OrcaSlicer config entries (key=value pairs) */
   setConfig(entries: Record<string, string>): void;
   /** Run the slicing pipeline. Optional progress callback with WASM log messages. */
   slice(onProgress?: (stage: string, progress: number, message?: string) => void): void;
@@ -311,8 +311,28 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
 
     setConfig(entries: Record<string, string>): void {
       const s = getSlicer();
+      const skipped: string[] = [];
       for (const [key, value] of Object.entries(entries)) {
-        s.setConfigString(key, value);
+        try {
+          s.setConfigString(key, value);
+        } catch (e: unknown) {
+          // Decode the WASM exception to check if it's a bad-value error
+          const decoded = decodeWasmException(e, `setConfig(${key}=${value})`);
+          if (decoded.message.includes('BadOptionValueException') ||
+              decoded.message.includes('UnknownOptionException') ||
+              decoded.message.includes('Invalid value')) {
+            // Log and skip — this key/value is not recognized by this OrcaSlicer build
+            console.warn(`[slicer-engine] Skipping config key="${key}" value="${value}": ${decoded.message}`);
+            skipped.push(key);
+          } else {
+            // Unexpected error — re-throw
+            console.error(`[slicer-engine] setConfigString failed for key="${key}" value="${value}":`, decoded.message);
+            throw decoded;
+          }
+        }
+      }
+      if (skipped.length > 0) {
+        console.warn(`[slicer-engine] Skipped ${skipped.length} unsupported config keys: ${skipped.join(', ')}`);
       }
     },
 

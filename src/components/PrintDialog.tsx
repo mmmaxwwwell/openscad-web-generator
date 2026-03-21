@@ -10,10 +10,22 @@ import type { ColorGroup } from '../lib/merge-3mf';
 import type { PrintProfile } from '../types/print-profile';
 import { DEFAULT_PRINT_PROFILE } from '../types/print-profile';
 import { getPrinterProfile, getNozzleProfile } from '../data/printer-profiles';
-import { buildPrusaConfig, type PrinterSettings } from '../lib/slicer-settings';
+import { buildOrcaConfig, type PrinterSettings } from '../lib/orca-slicer-settings';
+import type { PrinterStructureType, NozzleType } from '../lib/slicer-settings';
 import type { ScadSlicerSettings } from '../lib/scad-parser';
 import type { ParsedGCode } from '../lib/gcode-parser';
 import { GCodePreview } from './GCodePreview';
+import {
+  QualityTab,
+  WallsTab,
+  InfillTab,
+  SpeedTab,
+  SupportTab,
+  AdhesionTab,
+  CoolingTab,
+  RetractionTab,
+  AdvancedTab,
+} from './print-settings';
 
 // Re-export for any external consumers
 export type { PrintProfile } from '../types/print-profile';
@@ -27,6 +39,14 @@ const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   startGcode: 'START_PRINT BED_TEMP={bed_temp} EXTRUDER_TEMP={temp}',
   endGcode: 'END_PRINT',
   toolChangeGcode: 'T{tool}',
+  printableArea: [],
+  bedExcludeAreas: [],
+  printerStructureType: 'cartesian',
+  nozzleType: 'brass',
+  nozzleHRC: 0,
+  auxiliaryFan: false,
+  chamberTempControl: false,
+  maxVolumetricSpeed: 0,
 };
 
 /** Build PrinterSettings from a printer profile, falling back to generic defaults */
@@ -35,13 +55,13 @@ function printerSettingsFromProfile(profileId?: string): PrinterSettings {
   const profile = getPrinterProfile(profileId);
   if (!profile) return DEFAULT_PRINTER_SETTINGS;
   return {
+    ...DEFAULT_PRINTER_SETTINGS,
     bedWidth: profile.bedWidth,
     bedDepth: profile.bedDepth,
     maxHeight: profile.maxHeight,
     originCenter: profile.originCenter,
     startGcode: profile.startGcode,
     endGcode: profile.endGcode,
-    toolChangeGcode: DEFAULT_PRINTER_SETTINGS.toolChangeGcode,
   };
 }
 
@@ -55,27 +75,27 @@ function printProfileFromProfile(profileId?: string, nozzleDiameter?: number): P
   return {
     ...DEFAULT_PRINT_PROFILE,
     layerHeight: pd.layerHeight,
-    firstLayerHeight: pd.firstLayerHeight,
+    initialLayerPrintHeight: pd.initialLayerPrintHeight,
     lineWidth: pd.lineWidth,
-    shellCount: pd.shellCount,
+    wallLoops: pd.wallLoops,
     topLayers: pd.topLayers,
     bottomLayers: pd.bottomLayers,
-    shellOrder: pd.shellOrder,
-    infillDensity: pd.infillDensity,
+    wallSequence: pd.wallSequence,
+    sparseInfillDensity: pd.sparseInfillDensity,
     infillAngle: pd.infillAngle,
     infillOverlap: pd.infillOverlap,
     travelSpeed: pd.travelSpeed,
-    firstLayerSpeed: pd.firstLayerSpeed,
+    initialLayerSpeed: pd.initialLayerSpeed,
     outerWallSpeed: pd.outerWallSpeed,
-    firstLayerFillSpeed: pd.firstLayerFillSpeed,
+    initialLayerInfillSpeed: pd.initialLayerInfillSpeed,
     zHopHeight: pd.zHopHeight,
-    supportAngle: pd.supportAngle,
+    supportThresholdAngle: pd.supportThresholdAngle,
     supportXYOffset: pd.supportXYOffset,
     supportZGap: pd.supportZGap,
-    coastDist: pd.coastDist,
+    coastDistance: pd.coastDistance,
     wipeDistance: pd.wipeDistance,
     retractOnLayerChange: pd.retractOnLayerChange,
-    arcEnabled: pd.arcEnabled,
+    arcFittingEnable: pd.arcFittingEnable,
     ...(nozzle ? { lineWidth: nozzle.diameter * 1.05 } : {}),
   };
 }
@@ -101,14 +121,6 @@ function saveProfile(printerAddress: string, profile: PrintProfile): void {
   }
 }
 
-const INFILL_PATTERNS = [
-  { value: 'gyroid', label: 'Gyroid' },
-  { value: 'hex', label: 'Honeycomb' },
-  { value: 'grid', label: 'Grid' },
-  { value: 'triangle', label: 'Triangle' },
-  { value: 'linear', label: 'Lines' },
-];
-
 interface PrintDialogProps {
   printer: Printer;
   printerConfig: PrinterConfig | null;
@@ -132,6 +144,8 @@ interface PrintDialogProps {
   onClose: () => void;
   onToast?: (message: string) => void;
   scadSlicerSettings?: ScadSlicerSettings;
+  /** Human-readable slicer engine name (e.g. "WASM", "Native ARM") */
+  engineName?: string;
 }
 
 type DialogPhase = 'configure' | 'slicing' | 'done' | 'error' | 'preview';
@@ -231,8 +245,10 @@ export function PrintDialog({
   onUploadGcode,
   onClose,
   onToast,
-  scadSlicerSettings,
+  scadSlicerSettings: _scadSlicerSettings,
+  engineName,
 }: PrintDialogProps) {
+  void _scadSlicerSettings; // reserved for future scad-file slicer overrides
   const hasMulticolor = colorGroups && colorGroups.length > 1;
 
   const [phase, setPhase] = useState<DialogPhase>('configure');
@@ -240,10 +256,6 @@ export function PrintDialog({
     const base = printProfileFromProfile(printer.profileId, printer.nozzleDiameter);
     const saved = loadSavedProfile(printer.address);
     const merged = saved ? { ...base, ...saved } : base;
-    // Apply scad file slicer overrides as initial defaults
-    if (scadSlicerSettings?.topSingleWallLayers !== undefined) {
-      merged.topSingleWallLayers = scadSlicerSettings.topSingleWallLayers;
-    }
     return merged;
   });
   const [printerSettings, setPrinterSettings] = useState<PrinterSettings>(
@@ -312,8 +324,9 @@ export function PrintDialog({
     }));
   }, [printerConfig]);
 
-  const updateProfile = useCallback(<K extends keyof PrintProfile>(key: K, value: PrintProfile[K]) => {
-    setProfile((prev) => ({ ...prev, [key]: value }));
+  /** Update handler for extracted tab components */
+  const handleProfileChange = useCallback((updates: Partial<PrintProfile>) => {
+    setProfile((prev) => ({ ...prev, ...updates }));
   }, []);
 
   const updatePrinter = useCallback(<K extends keyof PrinterSettings>(key: K, value: PrinterSettings[K]) => {
@@ -321,7 +334,7 @@ export function PrintDialog({
   }, []);
 
   /** Update a filament-derived field — saves as per-printer override */
-  const updateFilamentField = useCallback((field: keyof PrinterFilamentOverride, value: number) => {
+  const updateFilamentField = useCallback((field: keyof PrinterFilamentOverride, value: number | boolean) => {
     setOverride(printer.address, primaryFilament.id, { [field]: value });
   }, [setOverride, printer.address, primaryFilament.id]);
 
@@ -340,9 +353,9 @@ export function PrintDialog({
     setUploadError(null);
     try {
       saveProfile(printer.address, profile);
-      const config = buildPrusaConfig(profile, resolved, printerSettings, printerConfig, extruderCount);
+      const config = buildOrcaConfig(profile, resolved, printerSettings, printerConfig, extruderCount);
 
-      // For multi-color, pass the 3MF buffer directly — PrusaSlicer handles
+      // For multi-color, pass the 3MF buffer directly — OrcaSlicer handles
       // extruder assignment internally from 3MF metadata.
       const result = await onSlice(stlData, config, hasMulticolor ? threeMfData : undefined);
       setSliceResult(result);
@@ -432,7 +445,7 @@ export function PrintDialog({
     { id: 'temperature', label: 'Temp' },
     { id: 'support', label: 'Support' },
     { id: 'adhesion', label: 'Adhesion' },
-    { id: 'fan', label: 'Fan' },
+    { id: 'cooling', label: 'Cooling' },
     { id: 'retraction', label: 'Retract' },
     { id: 'advanced', label: 'Advanced' },
   ];
@@ -470,6 +483,11 @@ export function PrintDialog({
             {printerConfigLoading && ' (loading config...)'}
             {printerConfig && ` (${printerConfig.bedWidth}x${printerConfig.bedDepth}mm${printerConfig.originCenter ? ', center origin' : ''})`}
           </span>
+          {engineName && (
+            <span className={`print-dialog-engine-badge ${engineName.toLowerCase().includes('native') ? 'print-dialog-engine-badge--native' : 'print-dialog-engine-badge--wasm'}`}>
+              {engineName}
+            </span>
+          )}
           {!hasMulticolor && (
             <label className="print-dialog-filament-select">
               <span>Filament:</span>
@@ -586,6 +604,144 @@ export function PrintDialog({
                       onChange={(e) => updatePrinter('originCenter', e.target.checked)} />
                     <span>Origin at bed center</span>
                   </label>
+
+                  <details className="print-dialog-details">
+                    <summary>Printable Area (polygon vertices)</summary>
+                    <p className="print-dialog-hint">
+                      Define the printable area as polygon vertices. Leave empty to use Bed Width &times; Depth rectangle.
+                    </p>
+                    {(printerSettings.printableArea ?? []).map((pt, i) => (
+                      <div key={i} className="print-dialog-inline-row">
+                        <label className="print-dialog-field">
+                          <span>X</span>
+                          <input type="number" value={pt.x} step={1}
+                            onChange={(e) => {
+                              const area = [...(printerSettings.printableArea ?? [])];
+                              area[i] = { ...area[i], x: Number(e.target.value) };
+                              updatePrinter('printableArea', area);
+                            }} />
+                        </label>
+                        <label className="print-dialog-field">
+                          <span>Y</span>
+                          <input type="number" value={pt.y} step={1}
+                            onChange={(e) => {
+                              const area = [...(printerSettings.printableArea ?? [])];
+                              area[i] = { ...area[i], y: Number(e.target.value) };
+                              updatePrinter('printableArea', area);
+                            }} />
+                        </label>
+                        <button className="print-dialog-remove-btn" onClick={() => {
+                          const area = (printerSettings.printableArea ?? []).filter((_, j) => j !== i);
+                          updatePrinter('printableArea', area);
+                        }}>&times;</button>
+                      </div>
+                    ))}
+                    <button className="print-dialog-add-btn" onClick={() => {
+                      const area = [...(printerSettings.printableArea ?? []), { x: 0, y: 0 }];
+                      updatePrinter('printableArea', area);
+                    }}>Add vertex</button>
+                  </details>
+
+                  <details className="print-dialog-details">
+                    <summary>Bed Exclude Areas</summary>
+                    <p className="print-dialog-hint">
+                      Rectangles the nozzle should not enter (e.g. for bed clips, purge bucket).
+                    </p>
+                    {(printerSettings.bedExcludeAreas ?? []).map((area, i) => (
+                      <div key={i} className="print-dialog-inline-row">
+                        <label className="print-dialog-field">
+                          <span>X</span>
+                          <input type="number" value={area.x} step={1}
+                            onChange={(e) => {
+                              const areas = [...(printerSettings.bedExcludeAreas ?? [])];
+                              areas[i] = { ...areas[i], x: Number(e.target.value) };
+                              updatePrinter('bedExcludeAreas', areas);
+                            }} />
+                        </label>
+                        <label className="print-dialog-field">
+                          <span>Y</span>
+                          <input type="number" value={area.y} step={1}
+                            onChange={(e) => {
+                              const areas = [...(printerSettings.bedExcludeAreas ?? [])];
+                              areas[i] = { ...areas[i], y: Number(e.target.value) };
+                              updatePrinter('bedExcludeAreas', areas);
+                            }} />
+                        </label>
+                        <label className="print-dialog-field">
+                          <span>W</span>
+                          <input type="number" value={area.width} min={1} step={1}
+                            onChange={(e) => {
+                              const areas = [...(printerSettings.bedExcludeAreas ?? [])];
+                              areas[i] = { ...areas[i], width: Number(e.target.value) };
+                              updatePrinter('bedExcludeAreas', areas);
+                            }} />
+                        </label>
+                        <label className="print-dialog-field">
+                          <span>H</span>
+                          <input type="number" value={area.height} min={1} step={1}
+                            onChange={(e) => {
+                              const areas = [...(printerSettings.bedExcludeAreas ?? [])];
+                              areas[i] = { ...areas[i], height: Number(e.target.value) };
+                              updatePrinter('bedExcludeAreas', areas);
+                            }} />
+                        </label>
+                        <button className="print-dialog-remove-btn" onClick={() => {
+                          const areas = (printerSettings.bedExcludeAreas ?? []).filter((_, j) => j !== i);
+                          updatePrinter('bedExcludeAreas', areas);
+                        }}>&times;</button>
+                      </div>
+                    ))}
+                    <button className="print-dialog-add-btn" onClick={() => {
+                      const areas = [...(printerSettings.bedExcludeAreas ?? []), { x: 0, y: 0, width: 10, height: 10 }];
+                      updatePrinter('bedExcludeAreas', areas);
+                    }}>Add exclude area</button>
+                  </details>
+
+                  <label className="print-dialog-field">
+                    <span>Printer Structure</span>
+                    <select value={printerSettings.printerStructureType}
+                      onChange={(e) => updatePrinter('printerStructureType', e.target.value as PrinterStructureType)}>
+                      <option value="cartesian">Cartesian</option>
+                      <option value="corexy">CoreXY</option>
+                      <option value="i3">i3 (bed slinger)</option>
+                      <option value="hbot">H-Bot</option>
+                      <option value="delta">Delta</option>
+                    </select>
+                  </label>
+
+                  <label className="print-dialog-field">
+                    <span>Nozzle Type</span>
+                    <select value={printerSettings.nozzleType}
+                      onChange={(e) => updatePrinter('nozzleType', e.target.value as NozzleType)}>
+                      <option value="brass">Brass</option>
+                      <option value="hardened_steel">Hardened Steel</option>
+                      <option value="stainless_steel">Stainless Steel</option>
+                      <option value="undefine">Unspecified</option>
+                    </select>
+                  </label>
+                  <label className="print-dialog-field">
+                    <span>Nozzle HRC (0 = not specified)</span>
+                    <input type="number" value={printerSettings.nozzleHRC} min={0} max={100} step={1}
+                      onChange={(e) => updatePrinter('nozzleHRC', Number(e.target.value))} />
+                  </label>
+
+                  <label className="print-dialog-field print-dialog-field--checkbox">
+                    <input type="checkbox" checked={printerSettings.auxiliaryFan}
+                      onChange={(e) => updatePrinter('auxiliaryFan', e.target.checked)} />
+                    <span>Auxiliary part cooling fan</span>
+                  </label>
+                  <label className="print-dialog-field print-dialog-field--checkbox">
+                    <input type="checkbox" checked={printerSettings.chamberTempControl}
+                      onChange={(e) => updatePrinter('chamberTempControl', e.target.checked)} />
+                    <span>Chamber temperature control</span>
+                  </label>
+
+                  <label className="print-dialog-field">
+                    <span>Max Volumetric Speed (mm&sup3;/s, 0 = unlimited)</span>
+                    <input type="number" value={printerSettings.maxVolumetricSpeed} min={0} max={100} step={0.5}
+                      onChange={(e) => updatePrinter('maxVolumetricSpeed', Number(e.target.value))} />
+                  </label>
+
                   <label className="print-dialog-field">
                     <span>Start GCode</span>
                     <textarea
@@ -615,85 +771,15 @@ export function PrintDialog({
               )}
 
               {activeSection === 'quality' && (
-                <>
-                  <label className="print-dialog-field">
-                    <span>Layer Height (mm)</span>
-                    <input type="number" value={profile.layerHeight} step={0.05} min={0.05} max={0.6}
-                      onChange={(e) => updateProfile('layerHeight', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>First Layer Height (mm)</span>
-                    <input type="number" value={profile.firstLayerHeight} step={0.05} min={0.1} max={0.6}
-                      onChange={(e) => updateProfile('firstLayerHeight', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Line Width (mm)</span>
-                    <input type="number" value={profile.lineWidth} step={0.05} min={0.1} max={1.0}
-                      onChange={(e) => updateProfile('lineWidth', Number(e.target.value))} />
-                  </label>
-                </>
+                <QualityTab profile={profile} onChange={handleProfileChange} />
               )}
 
               {activeSection === 'walls' && (
-                <>
-                  <label className="print-dialog-field">
-                    <span>Wall Count</span>
-                    <input type="number" value={profile.shellCount} min={1} max={20}
-                      onChange={(e) => updateProfile('shellCount', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Wall Order</span>
-                    <select value={profile.shellOrder}
-                      onChange={(e) => updateProfile('shellOrder', e.target.value as 'in-out' | 'out-in')}>
-                      <option value="in-out">Inner → Outer</option>
-                      <option value="out-in">Outer → Inner</option>
-                    </select>
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Top Layers</span>
-                    <input type="number" value={profile.topLayers} min={0} max={20}
-                      onChange={(e) => updateProfile('topLayers', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Bottom Layers</span>
-                    <input type="number" value={profile.bottomLayers} min={0} max={20}
-                      onChange={(e) => updateProfile('bottomLayers', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Top Single-Wall Layers</span>
-                    <input type="number" value={profile.topSingleWallLayers} min={0} max={50}
-                      onChange={(e) => updateProfile('topSingleWallLayers', Number(e.target.value))} />
-                  </label>
-                </>
+                <WallsTab profile={profile} onChange={handleProfileChange} />
               )}
 
               {activeSection === 'infill' && (
-                <>
-                  <label className="print-dialog-field">
-                    <span>Infill Density ({Math.round(profile.infillDensity * 100)}%)</span>
-                    <input type="range" value={profile.infillDensity} step={0.05} min={0} max={1}
-                      onChange={(e) => updateProfile('infillDensity', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Infill Pattern</span>
-                    <select value={profile.infillPattern}
-                      onChange={(e) => updateProfile('infillPattern', e.target.value)}>
-                      {INFILL_PATTERNS.map((p) => (
-                        <option key={p.value} value={p.value}>{p.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Infill Angle (°)</span>
-                    <input type="number" value={profile.infillAngle} min={0} max={180}
-                      onChange={(e) => updateProfile('infillAngle', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Infill Overlap ({Math.round(profile.infillOverlap * 100)}%)</span>
-                    <input type="range" value={profile.infillOverlap} step={0.05} min={0} max={0.8}
-                      onChange={(e) => updateProfile('infillOverlap', Number(e.target.value))} />
-                  </label>
-                </>
+                <InfillTab profile={profile} onChange={handleProfileChange} />
               )}
 
               {activeSection === 'speed' && (
@@ -708,26 +794,7 @@ export function PrintDialog({
                     <input type="number" value={resolved.printSpeed} min={5} max={printerConfig?.maxVelocity ?? 500}
                       onChange={(e) => updateFilamentField('printSpeed', Number(e.target.value))} />
                   </label>
-                  <label className="print-dialog-field">
-                    <span>Outer Wall Speed (mm/s, 0 = same)</span>
-                    <input type="number" value={profile.outerWallSpeed} min={0} max={printerConfig?.maxVelocity ?? 500}
-                      onChange={(e) => updateProfile('outerWallSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Travel Speed (mm/s)</span>
-                    <input type="number" value={profile.travelSpeed} min={10} max={printerConfig?.maxVelocity ?? 500}
-                      onChange={(e) => updateProfile('travelSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>First Layer Speed (mm/s)</span>
-                    <input type="number" value={profile.firstLayerSpeed} min={5} max={100}
-                      onChange={(e) => updateProfile('firstLayerSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>First Layer Infill Speed (mm/s)</span>
-                    <input type="number" value={profile.firstLayerFillSpeed} min={5} max={200}
-                      onChange={(e) => updateProfile('firstLayerFillSpeed', Number(e.target.value))} />
-                  </label>
+                  <SpeedTab profile={profile} onChange={handleProfileChange} maxVelocity={printerConfig?.maxVelocity} />
                 </>
               )}
 
@@ -777,166 +844,39 @@ export function PrintDialog({
               )}
 
               {activeSection === 'support' && (
-                <>
-                  <label className="print-dialog-field print-dialog-field--checkbox">
-                    <input type="checkbox" checked={profile.supportEnabled}
-                      onChange={(e) => updateProfile('supportEnabled', e.target.checked)} />
-                    <span>Enable Supports</span>
-                  </label>
-                  {profile.supportEnabled && (
-                    <>
-                      <label className="print-dialog-field">
-                        <span>Overhang Angle (°)</span>
-                        <input type="number" value={profile.supportAngle} min={0} max={90}
-                          onChange={(e) => updateProfile('supportAngle', Number(e.target.value))} />
-                      </label>
-                      <label className="print-dialog-field">
-                        <span>Support Density ({Math.round(profile.supportDensity * 100)}%)</span>
-                        <input type="range" value={profile.supportDensity} step={0.05} min={0.05} max={0.5}
-                          onChange={(e) => updateProfile('supportDensity', Number(e.target.value))} />
-                      </label>
-                      <label className="print-dialog-field">
-                        <span>XY Offset (mm)</span>
-                        <input type="number" value={profile.supportXYOffset} step={0.1} min={0} max={2}
-                          onChange={(e) => updateProfile('supportXYOffset', Number(e.target.value))} />
-                      </label>
-                      <label className="print-dialog-field">
-                        <span>Z Gap (layers)</span>
-                        <input type="number" value={profile.supportZGap} min={0} max={5}
-                          onChange={(e) => updateProfile('supportZGap', Number(e.target.value))} />
-                      </label>
-                    </>
-                  )}
-                </>
+                <SupportTab profile={profile} onChange={handleProfileChange} />
               )}
 
               {activeSection === 'adhesion' && (
-                <>
-                  <label className="print-dialog-field">
-                    <span>Adhesion Type</span>
-                    <select value={profile.adhesionType}
-                      onChange={(e) => updateProfile('adhesionType', e.target.value as PrintProfile['adhesionType'])}>
-                      <option value="none">None</option>
-                      <option value="skirt">Skirt</option>
-                      <option value="brim">Brim</option>
-                      <option value="raft">Raft</option>
-                    </select>
-                  </label>
-                  {profile.adhesionType === 'skirt' && (
-                    <label className="print-dialog-field">
-                      <span>Skirt Loops</span>
-                      <input type="number" value={profile.skirtCount} min={0} max={20}
-                        onChange={(e) => updateProfile('skirtCount', Number(e.target.value))} />
-                    </label>
-                  )}
-                  {profile.adhesionType === 'brim' && (
-                    <label className="print-dialog-field">
-                      <span>Brim Width (mm)</span>
-                      <input type="number" value={profile.brimWidth} min={1} max={30}
-                        onChange={(e) => updateProfile('brimWidth', Number(e.target.value))} />
-                    </label>
-                  )}
-                </>
+                <AdhesionTab profile={profile} onChange={handleProfileChange} />
               )}
 
-              {activeSection === 'fan' && (
-                <>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label={`Fan Speed (${resolved.fanSpeed}%)`}
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('fanSpeed')}
-                      onReset={() => resetFilamentField('fanSpeed')}
-                    />
-                    <input type="range" value={resolved.fanSpeed} min={0} max={100}
-                      onChange={(e) => updateFilamentField('fanSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label={`First Layer Fan (${resolved.firstLayerFan}%)`}
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('firstLayerFan')}
-                      onReset={() => resetFilamentField('firstLayerFan')}
-                    />
-                    <input type="range" value={resolved.firstLayerFan} min={0} max={100}
-                      onChange={(e) => updateFilamentField('firstLayerFan', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label="Min Speed (mm/s)"
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('minSpeed')}
-                      onReset={() => resetFilamentField('minSpeed')}
-                    />
-                    <input type="number" value={resolved.minSpeed} min={5} max={100}
-                      onChange={(e) => updateFilamentField('minSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label="Min Layer Time (s)"
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('minLayerTime')}
-                      onReset={() => resetFilamentField('minLayerTime')}
-                    />
-                    <input type="number" value={resolved.minLayerTime} min={0} max={30}
-                      onChange={(e) => updateFilamentField('minLayerTime', Number(e.target.value))} />
-                  </label>
-                </>
+              {activeSection === 'cooling' && (
+                <CoolingTab
+                  profile={profile}
+                  onChange={handleProfileChange}
+                  resolved={resolved}
+                  filamentName={primaryFilament.name}
+                  isOverridden={isOverridden}
+                  updateFilamentField={updateFilamentField}
+                  resetFilamentField={resetFilamentField}
+                />
               )}
 
               {activeSection === 'retraction' && (
-                <>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label="Retract Distance (mm)"
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('retractDist')}
-                      onReset={() => resetFilamentField('retractDist')}
-                    />
-                    <input type="number" value={resolved.retractDist} step={0.5} min={0} max={15}
-                      onChange={(e) => updateFilamentField('retractDist', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <OverridableLabel
-                      label="Retract Speed (mm/s)"
-                      filamentName={primaryFilament.name}
-                      isOverridden={isOverridden('retractSpeed')}
-                      onReset={() => resetFilamentField('retractSpeed')}
-                    />
-                    <input type="number" value={resolved.retractSpeed} min={5} max={120}
-                      onChange={(e) => updateFilamentField('retractSpeed', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Z-Hop (mm)</span>
-                    <input type="number" value={profile.zHopHeight} step={0.1} min={0} max={2}
-                      onChange={(e) => updateProfile('zHopHeight', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Coast Distance (mm)</span>
-                    <input type="number" value={profile.coastDist} step={0.1} min={0} max={5}
-                      onChange={(e) => updateProfile('coastDist', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field">
-                    <span>Wipe Distance (mm)</span>
-                    <input type="number" value={profile.wipeDistance} step={0.5} min={0} max={10}
-                      onChange={(e) => updateProfile('wipeDistance', Number(e.target.value))} />
-                  </label>
-                  <label className="print-dialog-field print-dialog-field--checkbox">
-                    <input type="checkbox" checked={profile.retractOnLayerChange}
-                      onChange={(e) => updateProfile('retractOnLayerChange', e.target.checked)} />
-                    <span>Retract on Layer Change</span>
-                  </label>
-                </>
+                <RetractionTab
+                  profile={profile}
+                  onChange={handleProfileChange}
+                  resolved={resolved}
+                  filamentName={primaryFilament.name}
+                  isOverridden={isOverridden}
+                  updateFilamentField={updateFilamentField}
+                  resetFilamentField={resetFilamentField}
+                />
               )}
 
               {activeSection === 'advanced' && (
-                <>
-                  <label className="print-dialog-field print-dialog-field--checkbox">
-                    <input type="checkbox" checked={profile.arcEnabled}
-                      onChange={(e) => updateProfile('arcEnabled', e.target.checked)} />
-                    <span>Enable Arc Fitting (G2/G3)</span>
-                  </label>
-                </>
+                <AdvancedTab profile={profile} onChange={handleProfileChange} />
               )}
             </div>
 
@@ -953,6 +893,11 @@ export function PrintDialog({
 
         {phase === 'slicing' && (
           <div className="print-dialog-progress">
+            {engineName && (
+              <span className={`print-dialog-engine-badge ${engineName.toLowerCase().includes('native') ? 'print-dialog-engine-badge--native' : 'print-dialog-engine-badge--wasm'}`}>
+                Slicing with {engineName}
+              </span>
+            )}
             <p className="print-dialog-progress-label">
               {slicerProgress
                 ? `${slicerProgress.stage}${slicerProgress.message ? ` (${slicerProgress.message})` : ''}... ${progressPercent(slicerProgress)}%`

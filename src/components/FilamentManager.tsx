@@ -13,6 +13,14 @@ interface FilamentManagerProps {
 
 const FILAMENT_TYPES = ['pla', 'petg', 'tpu', 'asa', 'abs', 'other'] as const;
 
+const OVERHANG_FAN_THRESHOLDS = [
+  { value: 0, label: 'Auto' },
+  { value: 25, label: '25%' },
+  { value: 50, label: '50%' },
+  { value: 75, label: '75%' },
+  { value: 95, label: '95%' },
+] as const;
+
 const EMPTY_PROFILE: Omit<FilamentProfile, 'id' | 'builtin'> = {
   name: '',
   type: 'pla',
@@ -27,6 +35,18 @@ const EMPTY_PROFILE: Omit<FilamentProfile, 'id' | 'builtin'> = {
   minSpeed: 20,
   minLayerTime: 6,
   notes: '',
+  // OrcaSlicer advanced fields
+  flowRatio: 1.0,
+  enablePressureAdvance: false,
+  pressureAdvance: 0.04,
+  adaptivePressureAdvance: false,
+  overhangFanThreshold: 0,
+  coolPlateTemp: 60,
+  coolPlateTempInitialLayer: 60,
+  engPlateTemp: 60,
+  engPlateTempInitialLayer: 60,
+  texturedPlateTemp: 60,
+  texturedPlateTempInitialLayer: 60,
 };
 
 function FilamentForm({
@@ -142,6 +162,169 @@ function FilamentForm({
           placeholder="Optional notes"
         />
       </label>
+
+      <details className="filament-advanced-section">
+        <summary>Advanced</summary>
+
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Flow Ratio ({values.flowRatio?.toFixed(2) ?? '1.00'})</span>
+            <input
+              type="range"
+              value={values.flowRatio ?? 1.0}
+              onChange={(e) => onChange({ flowRatio: Number(e.target.value) })}
+              min={0.8}
+              max={1.2}
+              step={0.01}
+            />
+          </label>
+        </div>
+
+        <h4>Pressure Advance</h4>
+        <div className="filament-form-row">
+          <label className="filament-form-field filament-checkbox-field">
+            <input
+              type="checkbox"
+              checked={values.enablePressureAdvance ?? false}
+              onChange={(e) => onChange({ enablePressureAdvance: e.target.checked })}
+            />
+            <span>Enable Pressure Advance</span>
+          </label>
+        </div>
+        {values.enablePressureAdvance && (
+          <>
+            <div className="filament-form-row">
+              <label className="filament-form-field">
+                <span>PA Value</span>
+                <input
+                  type="number"
+                  value={values.pressureAdvance ?? 0.04}
+                  onChange={(e) => onChange({ pressureAdvance: Number(e.target.value) })}
+                  min={0}
+                  max={2}
+                  step={0.001}
+                />
+              </label>
+            </div>
+            <div className="filament-form-row">
+              <label className="filament-form-field filament-checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={values.adaptivePressureAdvance ?? false}
+                  onChange={(e) => onChange({ adaptivePressureAdvance: e.target.checked })}
+                />
+                <span>Adaptive Pressure Advance</span>
+              </label>
+            </div>
+          </>
+        )}
+
+        <h4>Overhang Fan</h4>
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Overhang Fan Threshold</span>
+            <select
+              value={values.overhangFanThreshold ?? 0}
+              onChange={(e) => onChange({ overhangFanThreshold: Number(e.target.value) })}
+            >
+              {OVERHANG_FAN_THRESHOLDS.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <h4>Multi-Plate Bed Temperatures</h4>
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Cool Plate Temp</span>
+            <input
+              type="number"
+              value={values.coolPlateTemp ?? values.bedTemp}
+              onChange={(e) => onChange({ coolPlateTemp: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+          <label className="filament-form-field">
+            <span>Cool Plate Initial</span>
+            <input
+              type="number"
+              value={values.coolPlateTempInitialLayer ?? values.firstLayerBedTemp}
+              onChange={(e) => onChange({ coolPlateTempInitialLayer: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+        </div>
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Hot Plate Temp</span>
+            <input
+              type="number"
+              value={values.bedTemp}
+              onChange={(e) => onChange({ bedTemp: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+          <label className="filament-form-field">
+            <span>Hot Plate Initial</span>
+            <input
+              type="number"
+              value={values.firstLayerBedTemp}
+              onChange={(e) => onChange({ firstLayerBedTemp: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+        </div>
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Engineering Plate Temp</span>
+            <input
+              type="number"
+              value={values.engPlateTemp ?? values.bedTemp}
+              onChange={(e) => onChange({ engPlateTemp: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+          <label className="filament-form-field">
+            <span>Eng Plate Initial</span>
+            <input
+              type="number"
+              value={values.engPlateTempInitialLayer ?? values.firstLayerBedTemp}
+              onChange={(e) => onChange({ engPlateTempInitialLayer: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+        </div>
+        <div className="filament-form-row">
+          <label className="filament-form-field">
+            <span>Textured Plate Temp</span>
+            <input
+              type="number"
+              value={values.texturedPlateTemp ?? values.bedTemp}
+              onChange={(e) => onChange({ texturedPlateTemp: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+          <label className="filament-form-field">
+            <span>Textured Plate Initial</span>
+            <input
+              type="number"
+              value={values.texturedPlateTempInitialLayer ?? values.firstLayerBedTemp}
+              onChange={(e) => onChange({ texturedPlateTempInitialLayer: Number(e.target.value) })}
+              min={0}
+              max={150}
+            />
+          </label>
+        </div>
+      </details>
+
       <div className="filament-form-actions">
         <button onClick={onSubmit} className="filament-save-btn">{submitLabel}</button>
         <button onClick={onCancel}>Cancel</button>
@@ -172,6 +355,18 @@ export function FilamentManager({ filaments, onAdd, onUpdate, onDelete, onDuplic
       minSpeed: f.minSpeed,
       minLayerTime: f.minLayerTime,
       notes: f.notes,
+      // OrcaSlicer advanced fields
+      flowRatio: f.flowRatio ?? 1.0,
+      enablePressureAdvance: f.enablePressureAdvance ?? false,
+      pressureAdvance: f.pressureAdvance ?? 0.04,
+      adaptivePressureAdvance: f.adaptivePressureAdvance ?? false,
+      overhangFanThreshold: f.overhangFanThreshold ?? 0,
+      coolPlateTemp: f.coolPlateTemp ?? f.bedTemp,
+      coolPlateTempInitialLayer: f.coolPlateTempInitialLayer ?? f.firstLayerBedTemp,
+      engPlateTemp: f.engPlateTemp ?? f.bedTemp,
+      engPlateTempInitialLayer: f.engPlateTempInitialLayer ?? f.firstLayerBedTemp,
+      texturedPlateTemp: f.texturedPlateTemp ?? f.bedTemp,
+      texturedPlateTempInitialLayer: f.texturedPlateTempInitialLayer ?? f.firstLayerBedTemp,
     });
     setAddingNew(false);
   }, []);

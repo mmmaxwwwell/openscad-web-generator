@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Downloads pre-built libslic3r WASM artifacts from GitHub releases.
+ * Downloads pre-built OrcaSlicer libslic3r WASM artifacts from GitHub releases.
  * Fallback for CI or non-Nix environments where building from source is impractical.
  */
 
@@ -45,14 +45,25 @@ async function downloadFile(url, dest) {
 }
 
 /**
- * Find the latest release that contains libslic3r WASM assets.
- * Looks through recent releases for one tagged with 'slicer-wasm' prefix
- * or that contains the required libslic3r.* assets.
+ * Find the latest release that contains OrcaSlicer WASM assets.
+ * Looks through recent releases for one tagged with 'orcaslicer-wasm' prefix
+ * (or legacy 'slicer-wasm') that contains the required libslic3r.* assets.
  */
 async function findSlicerRelease() {
   const releases = await fetchJSON(GITHUB_API);
 
-  // First, look for a release with 'slicer-wasm' in the tag name
+  // First, look for a release with 'orcaslicer-wasm' in the tag name
+  for (const release of releases) {
+    if (release.tag_name.includes('orcaslicer-wasm')) {
+      const assets = release.assets || [];
+      const hasRequired = REQUIRED_ASSETS.every(name =>
+        assets.some(a => a.name === name)
+      );
+      if (hasRequired) return release;
+    }
+  }
+
+  // Fallback: look for legacy 'slicer-wasm' tag or any release with the assets
   for (const release of releases) {
     if (release.tag_name.includes('slicer-wasm')) {
       const assets = release.assets || [];
@@ -63,7 +74,7 @@ async function findSlicerRelease() {
     }
   }
 
-  // Fallback: look for any release containing libslic3r assets
+  // Last resort: any release with the right assets
   for (const release of releases) {
     const assets = release.assets || [];
     const hasRequired = REQUIRED_ASSETS.every(name =>
@@ -81,18 +92,18 @@ async function main() {
   // Check if already downloaded
   const allExist = REQUIRED_ASSETS.every(f => existsSync(join(WASM_DIR, f)));
   if (allExist && !force) {
-    console.log('libslic3r WASM files already present. Use --force to re-download.');
+    console.log('OrcaSlicer WASM files already present. Use --force to re-download.');
     return;
   }
 
   mkdirSync(WASM_DIR, { recursive: true });
 
-  console.log('Searching for libslic3r WASM release on GitHub...');
+  console.log('Searching for OrcaSlicer WASM release on GitHub...');
   const release = await findSlicerRelease();
 
   if (!release) {
     console.error(
-      'No GitHub release found with libslic3r WASM artifacts.\n' +
+      'No GitHub release found with OrcaSlicer WASM artifacts.\n' +
       'Build from source instead: node scripts/build-slicer-wasm.mjs'
     );
     process.exit(1);
@@ -123,10 +134,10 @@ async function main() {
     }
   }
 
-  console.log(`Done. libslic3r WASM from release ${release.tag_name}`);
+  console.log(`Done. OrcaSlicer WASM from release ${release.tag_name}`);
 }
 
 main().catch(err => {
-  console.error('Failed to download libslic3r WASM:', err.message);
+  console.error('Failed to download OrcaSlicer WASM:', err.message);
   process.exit(1);
 });

@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 /**
- * Builds libslic3r WASM using Nix.
+ * Builds OrcaSlicer libslic3r WASM using Nix.
  * Requires: nix with flakes enabled.
  *
- * Runs `nix build .#libslic3r-wasm` and copies the output artifacts
+ * Runs `nix build .#orcaslicer-wasm` and copies the output artifacts
  * into public/wasm/.
  */
 
@@ -49,14 +49,14 @@ async function main() {
   // Check if already built
   const allExist = REQUIRED_ARTIFACTS.every(a => existsSync(join(WASM_DIR, a)));
   if (allExist && !force) {
-    console.log('libslic3r WASM files already present. Use --force to rebuild.');
+    console.log('OrcaSlicer WASM files already present. Use --force to rebuild.');
     return;
   }
 
   checkPrerequisites();
 
-  console.log('Building libslic3r WASM via Nix (this will take a while on first build)...');
-  run('nix build .#libslic3r-wasm --print-build-logs', {
+  console.log('Building OrcaSlicer WASM via Nix (this will take a while on first build)...');
+  run('nix build .#orcaslicer-wasm --print-build-logs', {
     timeout: 120 * 60 * 1000, // 120 min timeout for first build
   });
 
@@ -90,10 +90,10 @@ async function main() {
     }
   }
 
-  console.log('Done. libslic3r WASM artifacts installed to public/wasm/');
+  console.log('Done. OrcaSlicer WASM artifacts installed to public/wasm/');
 }
 
 main().catch(err => {
-  console.error('Failed to build libslic3r WASM:', err.message);
+  console.error('Failed to build OrcaSlicer WASM:', err.message);
   process.exit(1);
 });

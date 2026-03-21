@@ -98,6 +98,14 @@ public class MainActivity extends Activity {
         webView.addJavascriptInterface(new PrinterDiscoveryBridge(), "AndroidPrinterDiscovery");
         webView.addJavascriptInterface(new BackHandlerBridge(), "AndroidBackHandler");
 
+        // Register native slicer bridge if JNI library is available
+        try {
+            webView.addJavascriptInterface(new SlicerBridge(webView), "NativeSlicer");
+            Log.i(TAG, "Native slicer bridge registered");
+        } catch (UnsatisfiedLinkError e) {
+            Log.i(TAG, "Native slicer not available (JNI library not present), using WASM fallback");
+        }
+
         nsdManager = (NsdManager) getSystemService(Context.NSD_SERVICE);
 
         if (savedInstanceState != null) {

@@ -651,6 +651,7 @@ function App() {
           onClose={() => { slicer.cancel(); setPrintDialogState(null); }}
           onToast={setToastMessage}
           scadSlicerSettings={scadSlicerSettings}
+          engineName={slicer.engineName}
         />
       )}
       <Toast message={toastMessage} onDismiss={handleDismissToast} />

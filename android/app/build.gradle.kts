@@ -25,6 +25,7 @@ tasks.named("preBuild") {
 android {
     namespace = "io.github.mmmaxwwwell.openscadweb"
     compileSdk = 35
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "io.github.mmmaxwwwell.openscadweb"
@@ -32,6 +33,29 @@ android {
         targetSdk = 35
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("VERSION_NAME") ?: "1.0.0"
+
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
+    }
+
+    // Only enable native build if jniLibs contain prebuilt libslic3r.so
+    // (copied from Nix output by scripts/copy-android-slicer.sh)
+    val hasNativeLibs = file("src/main/jniLibs/arm64-v8a/libslic3r.so").exists()
+    if (hasNativeLibs) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/jni/CMakeLists.txt")
+                version = "3.22.1+"
+            }
+        }
     }
 
     buildTypes {

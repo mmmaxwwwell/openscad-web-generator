@@ -6,8 +6,11 @@ result
 *.tsbuildinfo
 .claude/
 android/.gradle/
+android/app/.cxx/
 android/app/build/
 android/app/src/main/assets/webapp/
+android/app/src/main/jniLibs/
+android/app/src/main/jni/include/
 android/build/
 android/local.properties
 *.apk

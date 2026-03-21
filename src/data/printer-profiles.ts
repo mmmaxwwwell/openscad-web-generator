@@ -31,27 +31,27 @@ export interface FilamentDefaults {
 
 export interface PrintDefaults {
   layerHeight: number;
-  firstLayerHeight: number;
+  initialLayerPrintHeight: number;
   lineWidth: number;
-  shellCount: number;
+  wallLoops: number;
   topLayers: number;
   bottomLayers: number;
-  shellOrder: 'in-out' | 'out-in';
-  infillDensity: number;
+  wallSequence: 'inner_outer' | 'outer_inner' | 'inner_outer_inner';
+  sparseInfillDensity: number; // 0-100 percentage
   infillAngle: number;
-  infillOverlap: number;
+  infillOverlap: number; // 0-100 percentage
   travelSpeed: number;
-  firstLayerSpeed: number;
+  initialLayerSpeed: number;
   outerWallSpeed: number;
-  firstLayerFillSpeed: number;
+  initialLayerInfillSpeed: number;
   zHopHeight: number;
-  supportAngle: number;
+  supportThresholdAngle: number;
   supportXYOffset: number;
   supportZGap: number;
-  coastDist: number;
+  coastDistance: number;
   wipeDistance: number;
   retractOnLayerChange: boolean;
-  arcEnabled: boolean;
+  arcFittingEnable: boolean;
 }
 
 export interface PrinterProfile {
@@ -144,27 +144,27 @@ export const FLASHFORGE_ADV5M: PrinterProfile = {
   endGcode: ADV5M_END_GCODE,
   printDefaults: {
     layerHeight: 0.2,
-    firstLayerHeight: 0.2,
+    initialLayerPrintHeight: 0.2,
     lineWidth: 0.42,
-    shellCount: 2,
+    wallLoops: 2,
     topLayers: 5,
     bottomLayers: 3,
-    shellOrder: 'in-out',
-    infillDensity: 0.15,
+    wallSequence: 'inner_outer',
+    sparseInfillDensity: 15,
     infillAngle: 45,
-    infillOverlap: 0.5,
+    infillOverlap: 50,
     travelSpeed: 500,
-    firstLayerSpeed: 50,
+    initialLayerSpeed: 50,
     outerWallSpeed: 200,
-    firstLayerFillSpeed: 80,
+    initialLayerInfillSpeed: 80,
     zHopHeight: 0.4,
-    supportAngle: 30,
+    supportThresholdAngle: 30,
     supportXYOffset: 0.3,
     supportZGap: 1,
-    coastDist: 0,
+    coastDistance: 0,
     wipeDistance: 2,
     retractOnLayerChange: true,
-    arcEnabled: false,
+    arcFittingEnable: false,
   },
   filamentDefaults: {
     pla: {

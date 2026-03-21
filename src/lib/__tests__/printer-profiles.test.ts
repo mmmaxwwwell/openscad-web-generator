@@ -142,8 +142,8 @@ describe('printer-profiles', () => {
 
     it('has print defaults', () => {
       expect(FLASHFORGE_ADV5M.printDefaults.layerHeight).toBe(0.2);
-      expect(FLASHFORGE_ADV5M.printDefaults.shellCount).toBe(2);
-      expect(FLASHFORGE_ADV5M.printDefaults.infillDensity).toBe(0.15);
+      expect(FLASHFORGE_ADV5M.printDefaults.wallLoops).toBe(2);
+      expect(FLASHFORGE_ADV5M.printDefaults.sparseInfillDensity).toBe(15);
     });
   });
 });
