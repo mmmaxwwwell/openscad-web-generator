@@ -224,6 +224,191 @@ public:
         m_from_3mf = true;
     }
 
+    // --- Multi-object Build Plate API ---
+
+    // Clear the model, removing all objects. Resets state for a fresh plate.
+    void clearModel() {
+        m_model = Slic3r::Model();
+        m_model_loaded = false;
+        m_needs_centering = false;
+        m_sliced = false;
+        m_from_3mf = false;
+        m_plate_mode = false;
+        m_print.reset();
+    }
+
+    // Add an STL object to the model without replacing existing objects.
+    // Position is in model space (mm from origin), rotation in radians around Z.
+    // Returns the object index (0-based).
+    int addSTLObject(const std::string& path, double posX, double posY,
+                     double rotationZ, double scaleX, double scaleY, double scaleZ) {
+        Slic3r::Model tmp_model;
+        if (!Slic3r::load_stl(path.c_str(), &tmp_model)) {
+            throw std::runtime_error("Failed to load STL file: " + path);
+        }
+        if (tmp_model.objects.empty()) {
+            throw std::runtime_error("No objects found in STL file: " + path);
+        }
+
+        // Take the first object from the loaded model and add it to our model
+        auto* src_obj = tmp_model.objects[0];
+        auto* new_obj = m_model.add_object(*src_obj);
+
+        // Clear any existing instances and create one with the requested transform
+        new_obj->clear_instances();
+        auto* inst = new_obj->add_instance();
+        inst->set_offset(Slic3r::Vec3d(posX, posY, 0));
+        inst->set_rotation(Slic3r::Vec3d(0, 0, rotationZ));
+        inst->set_scaling_factor(Slic3r::Vec3d(scaleX, scaleY, scaleZ));
+
+        // Ensure the object sits on the bed (Z >= 0)
+        new_obj->ensure_on_bed();
+
+        m_model_loaded = true;
+        m_plate_mode = true;
+
+        int idx = static_cast<int>(m_model.objects.size()) - 1;
+        EM_ASM({ console.log('[slicer-wasm] Added STL object at index', $0,
+                             'pos=(' + $1 + ',' + $2 + ')', 'rot=' + $3); },
+               idx, posX, posY, rotationZ);
+        return idx;
+    }
+
+    // Add a 3MF object to the model without replacing existing objects.
+    // Multi-color 3MFs are merged into a single object with multiple volumes
+    // (same merge logic as load3MFFile). Position is in model space (mm from origin).
+    // Returns the object index (0-based).
+    int add3MFObject(const std::string& path, double posX, double posY,
+                     double rotationZ, double scaleX, double scaleY, double scaleZ) {
+        Slic3r::Model tmp_model;
+        Slic3r::DynamicPrintConfig config_from_3mf;
+        Slic3r::ConfigSubstitutionContext subst_ctx(Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent);
+        if (!Slic3r::load_3mf(path.c_str(), config_from_3mf, subst_ctx, &tmp_model, false)) {
+            throw std::runtime_error("Failed to load 3MF file: " + path);
+        }
+        if (tmp_model.objects.empty()) {
+            throw std::runtime_error("No objects found in 3MF file: " + path);
+        }
+
+        // Merge multi-color 3MF objects into a single object (same logic as load3MFFile)
+        if (tmp_model.objects.size() > 1) {
+            auto* merged = tmp_model.objects[0];
+            if (merged->instances.empty()) {
+                merged->add_instance();
+            }
+
+            int extruder_idx = 1;
+            for (auto* vol : merged->volumes) {
+                if (vol->config.get().empty() || !vol->config.get().has("extruder")) {
+                    vol->config.set("extruder", extruder_idx);
+                }
+            }
+
+            double primary_max_z = -std::numeric_limits<double>::max();
+            for (auto* vol : merged->volumes) {
+                auto bb = vol->mesh().bounding_box();
+                double vol_z = bb.max.z() + vol->get_offset().z();
+                if (vol_z > primary_max_z)
+                    primary_max_z = vol_z;
+            }
+
+            for (size_t i = 1; i < tmp_model.objects.size(); ++i) {
+                auto* src_obj = tmp_model.objects[i];
+                extruder_idx = static_cast<int>(i) + 1;
+
+                Slic3r::Vec3d src_offset(0, 0, 0);
+                Slic3r::Vec3d dst_offset(0, 0, 0);
+                if (!src_obj->instances.empty())
+                    src_offset = src_obj->instances[0]->get_offset();
+                if (!merged->instances.empty())
+                    dst_offset = merged->instances[0]->get_offset();
+                Slic3r::Vec3d delta = src_offset - dst_offset;
+
+                double src_max_z = -std::numeric_limits<double>::max();
+                for (auto* vol : src_obj->volumes) {
+                    auto bb = vol->mesh().bounding_box();
+                    double vol_z = bb.max.z() + vol->get_offset().z() + delta.z();
+                    if (vol_z > src_max_z)
+                        src_max_z = vol_z;
+                }
+                double overshoot = src_max_z - primary_max_z;
+                if (overshoot > 1e-6) {
+                    delta.z() -= overshoot;
+                }
+
+                for (auto* vol : src_obj->volumes) {
+                    auto* new_vol = merged->add_volume(*vol);
+                    if (delta.norm() > 1e-6) {
+                        new_vol->translate(delta);
+                    }
+                    new_vol->config.set("extruder", extruder_idx);
+                }
+            }
+
+            // Remove all objects except the merged one
+            while (tmp_model.objects.size() > 1) {
+                tmp_model.delete_object(tmp_model.objects.size() - 1);
+            }
+        }
+
+        // Add the (possibly merged) object to our model
+        auto* src_obj = tmp_model.objects[0];
+        auto* new_obj = m_model.add_object(*src_obj);
+
+        // Set the requested transform
+        new_obj->clear_instances();
+        auto* inst = new_obj->add_instance();
+        inst->set_offset(Slic3r::Vec3d(posX, posY, 0));
+        inst->set_rotation(Slic3r::Vec3d(0, 0, rotationZ));
+        inst->set_scaling_factor(Slic3r::Vec3d(scaleX, scaleY, scaleZ));
+
+        // For 3MF objects, use global min-Z translation to preserve stacked volumes
+        auto bb = new_obj->bounding_box_exact();
+        if (bb.min.z() < 0) {
+            for (auto* vol : new_obj->volumes) {
+                vol->translate(Slic3r::Vec3d(0, 0, -bb.min.z()));
+            }
+        }
+
+        m_model_loaded = true;
+        m_plate_mode = true;
+
+        int idx = static_cast<int>(m_model.objects.size()) - 1;
+        EM_ASM({ console.log('[slicer-wasm] Added 3MF object at index', $0,
+                             'pos=(' + $1 + ',' + $2 + ')', 'rot=' + $3); },
+               idx, posX, posY, rotationZ);
+        return idx;
+    }
+
+    // Set a per-object config override. The key/value follow OrcaSlicer .ini format.
+    // objectIndex is 0-based, matching the order objects were added.
+    void setObjectConfig(int objectIndex, const std::string& key, const std::string& value) {
+        if (objectIndex < 0 || objectIndex >= static_cast<int>(m_model.objects.size())) {
+            throw std::runtime_error("Object index out of range: " + std::to_string(objectIndex));
+        }
+        try {
+            Slic3r::ConfigSubstitutionContext subst_ctx(Slic3r::ForwardCompatibilitySubstitutionRule::EnableSilent);
+            m_model.objects[objectIndex]->config.set_deserialize(key, value, subst_ctx);
+        } catch (const Slic3r::UnknownOptionException&) {
+            // Silently ignore unknown options
+        }
+    }
+
+    // Set the print sequence mode: "by layer" or "by object".
+    void setPrintSequence(const std::string& mode) {
+        if (mode != "by layer" && mode != "by object") {
+            throw std::runtime_error("Invalid print sequence mode: '" + mode + "'. Use 'by layer' or 'by object'.");
+        }
+        setConfigString("print_sequence", mode);
+    }
+
+    // Return the number of objects currently in the model.
+    int getObjectCount() {
+        return static_cast<int>(m_model.objects.size());
+    }
+
+    // --- End Multi-object Build Plate API ---
+
     // Set a single OrcaSlicer config key-value pair.
     // Keys and values follow OrcaSlicer/PrusaSlicer .ini format.
     // Example: setConfigString("layer_height", "0.2")
@@ -246,49 +431,59 @@ public:
         try {
             m_print = std::make_unique<Slic3r::Print>();
 
-            // Center model instances on the bed if needed
-            if (m_needs_centering) {
-                EM_ASM({ console.log('[slicer-wasm] Centering model on bed...'); });
-                // Get bed center from config's printable_area (OrcaSlicer key, was bed_shape in PrusaSlicer)
-                auto* bed_shape_opt = m_config.option<Slic3r::ConfigOptionPoints>("printable_area");
-                if (bed_shape_opt && !bed_shape_opt->values.empty()) {
-                    Slic3r::Vec2d center(0, 0);
-                    for (const auto& pt : bed_shape_opt->values) {
-                        center.x() += pt.x();
-                        center.y() += pt.y();
-                    }
-                    center /= static_cast<double>(bed_shape_opt->values.size());
-                    m_model.center_instances_around_point(center);
-                } else {
-                    // Fallback: center around origin
-                    m_model.center_instances_around_point({0, 0});
-                }
-                m_needs_centering = false;
-            }
-
-            // Ensure the model sits on the print bed (Z >= 0).
-            // OpenSCAD models often use center=true which places geometry below Z=0.
-            // Without this, the slicer clips the below-bed portion.
-            if (m_from_3mf) {
-                // For 3MF files: multi-color 3MF objects have correct world-space
-                // positions from OpenSCAD's per-color rendering. Calling ensure_on_bed()
-                // per-object would drop each color's mesh to Z=0 independently,
-                // destroying stacked assemblies. Instead, find the global minimum Z
-                // across all objects and translate the entire assembly uniformly.
-                double global_min_z = std::numeric_limits<double>::max();
-                for (auto* obj : m_model.objects) {
-                    auto bb = obj->bounding_box_exact();
-                    if (bb.min.z() < global_min_z) {
-                        global_min_z = bb.min.z();
-                    }
-                }
-                if (global_min_z != 0.0 && global_min_z != std::numeric_limits<double>::max()) {
-                    m_model.translate(0, 0, -global_min_z);
-                }
+            // In plate mode, objects already have explicit positions set by the
+            // caller (addSTLObject/add3MFObject). Skip centering and ensure_on_bed
+            // since those were handled when each object was added.
+            if (m_plate_mode) {
+                EM_ASM({ console.log('[slicer-wasm] Plate mode: using explicit object positions (%d objects)',
+                         $0); }, static_cast<int>(m_model.objects.size()));
             } else {
-                // For STL files: each object is independent, drop to bed individually.
-                for (auto* obj : m_model.objects) {
-                    obj->ensure_on_bed();
+                // Single-object mode (legacy API via loadSTLFile/load3MFFile)
+
+                // Center model instances on the bed if needed
+                if (m_needs_centering) {
+                    EM_ASM({ console.log('[slicer-wasm] Centering model on bed...'); });
+                    // Get bed center from config's printable_area (OrcaSlicer key, was bed_shape in PrusaSlicer)
+                    auto* bed_shape_opt = m_config.option<Slic3r::ConfigOptionPoints>("printable_area");
+                    if (bed_shape_opt && !bed_shape_opt->values.empty()) {
+                        Slic3r::Vec2d center(0, 0);
+                        for (const auto& pt : bed_shape_opt->values) {
+                            center.x() += pt.x();
+                            center.y() += pt.y();
+                        }
+                        center /= static_cast<double>(bed_shape_opt->values.size());
+                        m_model.center_instances_around_point(center);
+                    } else {
+                        // Fallback: center around origin
+                        m_model.center_instances_around_point({0, 0});
+                    }
+                    m_needs_centering = false;
+                }
+
+                // Ensure the model sits on the print bed (Z >= 0).
+                // OpenSCAD models often use center=true which places geometry below Z=0.
+                // Without this, the slicer clips the below-bed portion.
+                if (m_from_3mf) {
+                    // For 3MF files: multi-color 3MF objects have correct world-space
+                    // positions from OpenSCAD's per-color rendering. Calling ensure_on_bed()
+                    // per-object would drop each color's mesh to Z=0 independently,
+                    // destroying stacked assemblies. Instead, find the global minimum Z
+                    // across all objects and translate the entire assembly uniformly.
+                    double global_min_z = std::numeric_limits<double>::max();
+                    for (auto* obj : m_model.objects) {
+                        auto bb = obj->bounding_box_exact();
+                        if (bb.min.z() < global_min_z) {
+                            global_min_z = bb.min.z();
+                        }
+                    }
+                    if (global_min_z != 0.0 && global_min_z != std::numeric_limits<double>::max()) {
+                        m_model.translate(0, 0, -global_min_z);
+                    }
+                } else {
+                    // For STL files: each object is independent, drop to bed individually.
+                    for (auto* obj : m_model.objects) {
+                        obj->ensure_on_bed();
+                    }
                 }
             }
 
@@ -378,6 +573,7 @@ private:
     bool m_needs_centering = false;
     bool m_sliced = false;
     bool m_from_3mf = false;
+    bool m_plate_mode = false;  // true when using multi-object API (addSTLObject/add3MFObject)
 };
 
 
@@ -392,5 +588,12 @@ EMSCRIPTEN_BINDINGS(slicer_module) {
         .function("setConfigString", &WasmSlicer::setConfigString)
         .function("slice", &WasmSlicer::slice)
         .function("exportGCode", &WasmSlicer::exportGCode)
+        // Multi-object Build Plate API
+        .function("clearModel", &WasmSlicer::clearModel)
+        .function("addSTLObject", &WasmSlicer::addSTLObject)
+        .function("add3MFObject", &WasmSlicer::add3MFObject)
+        .function("setObjectConfig", &WasmSlicer::setObjectConfig)
+        .function("setPrintSequence", &WasmSlicer::setPrintSequence)
+        .function("getObjectCount", &WasmSlicer::getObjectCount)
         ;
 }

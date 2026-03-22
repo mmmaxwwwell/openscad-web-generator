@@ -266,12 +266,27 @@ export function buildOrcaConfig(
   const perExtStr = (v: string): string => Array(extruderCount).fill(v).join(';');
 
   // ================================================================
+  // PRINT SEQUENCE
+  // ================================================================
+  // OrcaSlicer uses "by layer" / "by object" (with space, not underscore)
+  config['print_sequence'] = p.printSequence === 'by_object' ? 'by object' : 'by layer';
+
+  // ================================================================
   // QUALITY — Layer & Line Width
   // ================================================================
   config['layer_height'] = String(p.layerHeight);
   config['initial_layer_print_height'] = String(p.initialLayerPrintHeight);
   config['adaptive_layer_height'] = p.adaptiveLayerHeight ? '1' : '0';
   config['precise_z_height'] = p.preciseZHeight ? '1' : '0';
+
+  // Compensation
+  config['elefant_foot_compensation'] = String(p.elephantFootCompensation);
+  config['elefant_foot_compensation_layers'] = String(Math.round(p.elephantFootCompensationLayers));
+  config['xy_hole_compensation'] = String(p.xyHoleCompensation);
+  config['xy_contour_compensation'] = String(p.xyContourCompensation);
+
+  // Slicing mode
+  config['slicing_mode'] = p.slicingMode;
 
   // Line widths (OrcaSlicer uses mm, 0 = auto from nozzle)
   config['line_width'] = String(p.lineWidth);
@@ -421,6 +436,20 @@ export function buildOrcaConfig(
   config['support_interface_pattern'] = SUPPORT_INTERFACE_PATTERN_MAP[p.supportInterfacePattern] ?? p.supportInterfacePattern;
   config['support_interface_spacing'] = String(p.supportInterfaceSpacing);
   config['support_interface_speed'] = String(p.supportInterfaceSpeed);
+  config['support_expansion'] = String(p.supportExpansion);
+  config['support_critical_regions_only'] = p.supportCriticalRegionsOnly ? '1' : '0';
+  config['support_remove_small_overhang'] = p.supportRemoveSmallOverhang ? '1' : '0';
+  config['bridge_no_support'] = p.bridgeNoSupport ? '1' : '0';
+  config['max_bridge_length'] = String(p.maxBridgeLength);
+
+  // Tree support
+  config['tree_support_branch_distance'] = String(p.treeSupportBranchDistance);
+  config['tree_support_tip_diameter'] = String(p.treeSupportTipDiameter);
+  config['tree_support_branch_diameter'] = String(p.treeSupportBranchDiameter);
+  config['tree_support_branch_angle'] = String(Math.round(p.treeSupportBranchAngle));
+  config['tree_support_wall_count'] = String(Math.round(p.treeSupportWallCount));
+  config['tree_support_auto_brim'] = p.treeSupportAutoBrim ? '1' : '0';
+
   // Support density: OrcaSlicer uses support_base_pattern_spacing (mm)
   // spacing ≈ lineWidth / (density/100)
   if (p.supportDensity > 0) {
@@ -445,12 +474,17 @@ export function buildOrcaConfig(
     config['brim_width'] = String(p.brimWidth);
     config['brim_ears_detection_length'] = String(p.brimEarsDetectionLength);
     config['brim_ears_max_angle'] = String(p.brimEarsMaxAngle);
+    config['brim_object_gap'] = String(p.brimObjectGap);
     config['raft_layers'] = '0';
   } else if (p.adhesionType === 'raft') {
     config['skirt_loops'] = '0';
     config['brim_type'] = 'no_brim';
     config['brim_width'] = '0';
     config['raft_layers'] = String(Math.round(p.raftLayers > 0 ? p.raftLayers : 2));
+    config['raft_contact_distance'] = String(p.raftContactDistance);
+    config['raft_expansion'] = String(p.raftExpansion);
+    config['raft_first_layer_density'] = String(p.raftFirstLayerDensity) + '%';
+    config['raft_first_layer_expansion'] = String(p.raftFirstLayerExpansion);
   } else {
     // none
     config['skirt_loops'] = '0';
@@ -565,6 +599,11 @@ export function buildOrcaConfig(
   const filamentDia = pc?.filamentDiameter ?? 1.75;
   config['nozzle_diameter'] = Array(extruderCount).fill(String(nozzle)).join(',');
   config['filament_diameter'] = Array(extruderCount).fill(String(filamentDia)).join(',');
+
+  // Flush into settings (relevant for multi-material)
+  config['flush_into_objects'] = p.flushIntoObjects ? '1' : '0';
+  config['flush_into_infill'] = p.flushIntoInfill ? '1' : '0';
+  config['flush_into_support'] = p.flushIntoSupport ? '1' : '0';
 
   // Multi-material
   if (extruderCount > 1) {
@@ -685,6 +724,15 @@ export function buildOrcaConfig(
   config['overhang_reverse_internal_only'] = p.overhangReverseInternalOnly ? '1' : '0';
   if (p.overhangReverse) {
     config['overhang_reverse_threshold'] = String(p.overhangReverseThreshold) + '%';
+  }
+
+  // Interlocking beam
+  config['interlocking_beam'] = p.interlockingBeam ? '1' : '0';
+  if (p.interlockingBeam) {
+    config['interlocking_beam_width'] = String(p.interlockingBeamWidth);
+    config['interlocking_orientation'] = String(p.interlockingOrientation);
+    config['interlocking_beam_layer_count'] = String(Math.round(p.interlockingBeamLayerCount));
+    config['interlocking_depth'] = String(p.interlockingDepth);
   }
 
   // Slow down layers (gradual speed increase)

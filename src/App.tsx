@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ScadParam, ScadParamSet, ScadValue } from './types';
-import type { S3Config, StorageConfig } from './lib/storage';
 import { useStorage } from './hooks/useStorage';
 import { useScadParser } from './hooks/useScadParser';
 import { useOpenSCAD } from './hooks/useOpenSCAD';
@@ -13,6 +12,7 @@ import { PreviewPanel } from './components/PreviewPanel';
 import { ExportControls } from './components/ExportControls';
 import { PrinterSettings } from './components/PrinterSettings';
 import { PrintDialog } from './components/PrintDialog';
+import { BuildPlateView } from './components/BuildPlateView';
 import { Toast } from './components/Toast';
 import { playDing } from './lib/notification-sound';
 import { usePrinters } from './hooks/usePrinters';
@@ -124,22 +124,8 @@ function App() {
     setDisclaimerAccepted(true);
   }, []);
 
-  // ─── Storage configuration ──────────────────────────────
-  const [storageBackend, setStorageBackend] = useState<'browser' | 's3'>('browser');
-  const [s3Config, setS3Config] = useState<S3Config>({
-    endpoint: '',
-    bucket: '',
-    region: 'us-east-1',
-    accessKeyId: '',
-    secretAccessKey: '',
-  });
-  const storageConfig = useMemo<StorageConfig>(
-    () => storageBackend === 's3'
-      ? { backend: 's3', s3: s3Config }
-      : { backend: 'browser' },
-    [storageBackend, s3Config],
-  );
-  const storage = useStorage(storageConfig);
+  // ─── Storage ────────────────────────────────────────────
+  const storage = useStorage();
 
   // ─── OpenSCAD WASM ─────────────────────────────────────
   const openscad = useOpenSCAD();
@@ -337,6 +323,59 @@ function App() {
   const { printers, addPrinter, updatePrinter, deletePrinter } = usePrinters();
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
 
+  // ─── Build Plate mode ───────────────────────────────
+  const [buildPlateOpen, setBuildPlateOpen] = useState(false);
+  const [buildPlatePrinter, setBuildPlatePrinter] = useState<Printer | null>(null);
+
+  const handleOpenBuildPlate = useCallback((printer?: Printer) => {
+    const target = printer ?? printers[0] ?? null;
+    if (!target) {
+      setToastMessage('Add a printer first (need bed dimensions for build plate)');
+      return;
+    }
+    setBuildPlatePrinter(target);
+    setBuildPlateOpen(true);
+  }, [printers]);
+
+  const handleCloseBuildPlate = useCallback(() => {
+    setBuildPlateOpen(false);
+    setBuildPlatePrinter(null);
+  }, []);
+
+  const handleSendToBuildPlate = useCallback((meshData: ArrayBuffer, format: 'stl' | '3mf', name: string, colorGroups?: ColorGroup[], scadMeta?: { source: string; params: Record<string, ScadValue>; paramDefs: ScadParam[]; fileId: string }) => {
+    // Open build plate if not already open
+    const target = buildPlatePrinter ?? printers[0] ?? null;
+    if (!target) {
+      setToastMessage('Add a printer first (need bed dimensions for build plate)');
+      return;
+    }
+    if (!buildPlateOpen) {
+      setBuildPlatePrinter(target);
+      setBuildPlateOpen(true);
+    }
+    // The build plate will need to receive this object — store it for BuildPlateView to pick up
+    setPendingBuildPlateObject({
+      meshData, format, name, colorGroups,
+      ...(scadMeta ? {
+        scadSource: scadMeta.source,
+        scadParams: scadMeta.params,
+        scadParamDefs: scadMeta.paramDefs,
+        scadFileId: scadMeta.fileId,
+      } : {}),
+    });
+  }, [buildPlatePrinter, buildPlateOpen, printers]);
+
+  const [pendingBuildPlateObject, setPendingBuildPlateObject] = useState<{
+    meshData: ArrayBuffer;
+    format: 'stl' | '3mf';
+    name: string;
+    colorGroups?: ColorGroup[];
+    scadSource?: string;
+    scadParams?: Record<string, ScadValue>;
+    scadParamDefs?: ScadParam[];
+    scadFileId?: string;
+  } | null>(null);
+
   // ─── Print Dialog (slice & send) ──────────────────────
   const [printDialogState, setPrintDialogState] = useState<{
     printer: Printer;
@@ -388,9 +427,13 @@ function App() {
   // ─── Android back button handling ─────────────────────
   useEffect(() => {
     const handler = () => {
-      // Priority: close PrintDialog > close PrinterSettings > go back to files > exit app
+      // Priority: close PrintDialog > close BuildPlate > close PrinterSettings > go back to files > exit app
       if (printDialogState) {
         setPrintDialogState(null);
+        return true;
+      }
+      if (buildPlateOpen) {
+        handleCloseBuildPlate();
         return true;
       }
       if (showPrinterSettings) {
@@ -410,7 +453,7 @@ function App() {
     return () => {
       delete (window as unknown as Record<string, unknown>).__onAndroidBack;
     };
-  }, [printDialogState, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles]);
+  }, [printDialogState, buildPlateOpen, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles, handleCloseBuildPlate]);
 
   // ─── Escape key handling (mirrors Android back button) ──
   useEffect(() => {
@@ -418,7 +461,9 @@ function App() {
       if (e.key !== 'Escape') return;
       // PrintDialog handles its own Escape internally
       if (printDialogState) return;
-      if (showPrinterSettings) {
+      if (buildPlateOpen) {
+        handleCloseBuildPlate();
+      } else if (showPrinterSettings) {
         setShowPrinterSettings(false);
       } else if (selectedFileId && fileSource) {
         handleBackToFiles();
@@ -426,7 +471,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [printDialogState, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles]);
+  }, [printDialogState, buildPlateOpen, showPrinterSettings, selectedFileId, fileSource, handleBackToFiles, handleCloseBuildPlate]);
 
   // ─── GitHub corner ─────────────────────────────────────
   const githubCorner = (
@@ -476,18 +521,24 @@ function App() {
           onFileUpload={handleFileUpload}
           onFileDelete={handleFileDelete}
           onExampleLoad={handleExampleLoad}
-          onRefresh={storage.refresh}
           selectedFileId={selectedFileId}
-          storageBackend={storageBackend}
-          onStorageBackendChange={setStorageBackend}
         />
-        <button
-          className="printer-settings-btn"
-          onClick={() => setShowPrinterSettings(true)}
-          title="Manage Moonraker printers"
-        >
-          &#9881; Printers
-        </button>
+        <div className="file-screen-actions">
+          <button
+            className="build-plate-open-btn"
+            onClick={() => handleOpenBuildPlate()}
+            title="Open build plate to arrange multiple objects for printing"
+          >
+            &#9638; Build Plate
+          </button>
+          <button
+            className="printer-settings-btn"
+            onClick={() => setShowPrinterSettings(true)}
+            title="Manage Moonraker printers"
+          >
+            &#9881; Printers
+          </button>
+        </div>
         {showPrinterSettings && (
           <PrinterSettings
             printers={printers}
@@ -497,55 +548,14 @@ function App() {
             onClose={() => setShowPrinterSettings(false)}
           />
         )}
-        {storageBackend === 's3' && (
-          <div className="s3-config">
-            <h3>S3 Configuration</h3>
-            <div className="s3-config-fields">
-              <label>
-                Endpoint
-                <input
-                  type="text"
-                  placeholder="https://s3.amazonaws.com"
-                  value={s3Config.endpoint}
-                  onChange={(e) => setS3Config((prev) => ({ ...prev, endpoint: e.target.value }))}
-                />
-              </label>
-              <label>
-                Bucket
-                <input
-                  type="text"
-                  placeholder="my-scad-files"
-                  value={s3Config.bucket}
-                  onChange={(e) => setS3Config((prev) => ({ ...prev, bucket: e.target.value }))}
-                />
-              </label>
-              <label>
-                Region
-                <input
-                  type="text"
-                  placeholder="us-east-1"
-                  value={s3Config.region}
-                  onChange={(e) => setS3Config((prev) => ({ ...prev, region: e.target.value }))}
-                />
-              </label>
-              <label>
-                Access Key ID
-                <input
-                  type="text"
-                  value={s3Config.accessKeyId}
-                  onChange={(e) => setS3Config((prev) => ({ ...prev, accessKeyId: e.target.value }))}
-                />
-              </label>
-              <label>
-                Secret Access Key
-                <input
-                  type="password"
-                  value={s3Config.secretAccessKey}
-                  onChange={(e) => setS3Config((prev) => ({ ...prev, secretAccessKey: e.target.value }))}
-                />
-              </label>
-            </div>
-          </div>
+        {buildPlateOpen && buildPlatePrinter && (
+          <BuildPlateView
+            printer={buildPlatePrinter}
+            openscad={openscad}
+            onClose={handleCloseBuildPlate}
+            pendingObject={pendingBuildPlateObject}
+            onPendingObjectConsumed={() => setPendingBuildPlateObject(null)}
+          />
         )}
         {fileLoadError && (
           <div className="file-load-error">{fileLoadError}</div>
@@ -569,6 +579,13 @@ function App() {
           {openscad.status === 'rendering' && 'WASM: Rendering…'}
           {openscad.status === 'error' && 'WASM: Error'}
         </span>
+        <button
+          className="build-plate-open-btn"
+          onClick={() => handleOpenBuildPlate()}
+          title="Open build plate"
+        >
+          &#9638; Build Plate
+        </button>
         <button
           className="printer-settings-btn"
           onClick={() => setShowPrinterSettings(true)}
@@ -610,6 +627,8 @@ function App() {
               onRenderComplete={handleRenderComplete}
               onToast={setToastMessage}
               onSendToPrinter={handleSendToPrinter}
+              onSendToBuildPlate={handleSendToBuildPlate}
+              paramDefs={parsedFile?.params}
             />
           </div>
 
@@ -652,6 +671,15 @@ function App() {
           onToast={setToastMessage}
           scadSlicerSettings={scadSlicerSettings}
           engineName={slicer.engineName}
+        />
+      )}
+      {buildPlateOpen && buildPlatePrinter && (
+        <BuildPlateView
+          printer={buildPlatePrinter}
+          openscad={openscad}
+          onClose={handleCloseBuildPlate}
+          pendingObject={pendingBuildPlateObject}
+          onPendingObjectConsumed={() => setPendingBuildPlateObject(null)}
         />
       )}
       <Toast message={toastMessage} onDismiss={handleDismissToast} />

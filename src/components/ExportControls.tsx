@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ScadValue } from '../types';
+import type { ScadParam, ScadValue } from '../types';
 import type { UseOpenSCADResult } from '../hooks/useOpenSCAD';
 import type { OutputFormat } from '../lib/openscad-api';
 import type { Printer } from '../hooks/usePrinters';
@@ -19,6 +19,8 @@ interface ExportControlsProps {
   onRenderComplete?: () => void;
   onToast?: (message: string) => void;
   onSendToPrinter?: (printer: Printer, stlData: ArrayBuffer, fileName: string, colorGroups?: ColorGroup[], threeMfData?: ArrayBuffer) => void;
+  onSendToBuildPlate?: (meshData: ArrayBuffer, format: 'stl' | '3mf', name: string, colorGroups?: ColorGroup[], scadMeta?: { source: string; params: Record<string, ScadValue>; paramDefs: ScadParam[]; fileId: string }) => void;
+  paramDefs?: ScadParam[];
 }
 
 type ExportType = OutputFormat | 'multicolor-3mf';
@@ -68,7 +70,7 @@ function buildSTLFromMeshes(threeMfData: ArrayBuffer): ArrayBuffer {
   return buf;
 }
 
-export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast, onSendToPrinter }: ExportControlsProps) {
+export function ExportControls({ source, params, openscad, fileName, printers, onModelGenerated, onRenderComplete, onToast, onSendToPrinter, onSendToBuildPlate, paramDefs }: ExportControlsProps) {
   const [exporting, setExporting] = useState<ExportType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorLogs, setErrorLogs] = useState<string[]>([]);
@@ -208,6 +210,29 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
     onSendToPrinter(printer, stlData, `${baseName}.stl`);
   }, [onSendToPrinter, source, params, openscad, fileName, onToast]);
 
+  const handleSendToBuildPlate = useCallback(async (format: ExportType) => {
+    if (!onSendToBuildPlate || !source) return;
+
+    const cacheKey = await computeCacheKey(source, params, format);
+    const data = await getCachedRender(cacheKey);
+    if (!data) {
+      onToast?.(`Render ${formatLabel(format)} first`);
+      return;
+    }
+
+    const baseName = fileName.replace(/\.scad$/i, '');
+    const scadMeta = (source && paramDefs && fileName.endsWith('.scad'))
+      ? { source, params, paramDefs, fileId: fileName }
+      : undefined;
+    if (format === 'multicolor-3mf') {
+      const groups = extractColorGroups(data);
+      onSendToBuildPlate(data, '3mf', baseName, groups.length > 1 ? groups : undefined, scadMeta);
+    } else {
+      const meshFormat = format === 'stl' ? 'stl' as const : '3mf' as const;
+      onSendToBuildPlate(data, meshFormat, baseName, undefined, scadMeta);
+    }
+  }, [onSendToBuildPlate, source, params, paramDefs, fileName, onToast]);
+
   const hasPrinters = printers.length > 0 && onSendToPrinter;
 
   function renderFormatSection(format: ExportType) {
@@ -242,6 +267,15 @@ export function ExportControls({ source, params, openscad, fileName, printers, o
               onSelectPrinter={(printer) => handleSendForFormat(format, printer)}
               label="Send to Printer"
             />
+          )}
+          {isCached && !isRendering && onSendToBuildPlate && (
+            <button
+              className="export-build-plate-btn"
+              onClick={() => handleSendToBuildPlate(format)}
+              title="Add this model to the build plate"
+            >
+              + Build Plate
+            </button>
           )}
         </div>
       </div>

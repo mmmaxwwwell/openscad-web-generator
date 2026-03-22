@@ -209,6 +209,13 @@ Two WASM modules, both loaded in Web Workers:
 | Android | Gradle, JDK 17, WebView |
 | CI/CD | GitHub Actions → GitHub Pages |
 
+## Debugging
+
+- **Be self-sufficient.** When debugging issues, write tests to reproduce and diagnose the problem — do NOT ask the user to run commands or paste browser console output. Everything should be testable.
+- **Unit tests first.** If the issue can be reproduced in a unit test (vitest), do that. Use `vi.mock`, `vi.useFakeTimers`, delayed promises, etc. to simulate real-world timing and conditions.
+- **Integration tests as fallback.** If unit tests can't reproduce the issue (e.g., browser-specific behavior, WebGL, full component interaction), write a Playwright integration test (`npm run test:integration`).
+- **Test the fix.** After fixing a bug, write a test that would have caught it. Verify the test fails without the fix and passes with it when possible.
+
 ## Conventions
 
 - SPDX license header on every source file: `// SPDX-License-Identifier: AGPL-3.0-or-later`

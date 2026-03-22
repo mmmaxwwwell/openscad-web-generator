@@ -63,11 +63,18 @@ export type SupportInterfacePattern = 'auto' | 'rectilinear' | 'concentric' | 'r
 
 export type TimelapseType = 'none' | 'smooth';
 
+export type PrintSequence = 'by_layer' | 'by_object';
+
+export type SlicingMode = 'regular' | 'even_odd' | 'close_holes';
+
 // ============================================================
 // PrintProfile
 // ============================================================
 
 export interface PrintProfile {
+  // -- Print Sequence --
+  printSequence: PrintSequence;           // 'by_layer' (default) or 'by_object'
+
   // -- Quality --
   layerHeight: number;                   // mm (0.05-0.6)
   initialLayerPrintHeight: number;       // mm (first layer height)
@@ -102,6 +109,15 @@ export interface PrintProfile {
   scarfSteps: number;
   scarfInnerWalls: boolean;
   scarfHasScarf: boolean;               // master enable
+
+  // -- Compensation --
+  elephantFootCompensation: number;       // mm (default 0)
+  elephantFootCompensationLayers: number; // int (default 1)
+  xyHoleCompensation: number;             // mm (default 0)
+  xyContourCompensation: number;          // mm (default 0)
+
+  // -- Slicing Mode --
+  slicingMode: SlicingMode;               // default 'regular'
 
   // -- Walls --
   wallLoops: number;                     // number of perimeters (1-20)
@@ -196,6 +212,11 @@ export interface PrintProfile {
   accelToDecelEnable: boolean;
   accelToDecelFactor: number;            // percentage (0-100)
 
+  // -- Flush / Purge --
+  flushIntoObjects: boolean;              // default false
+  flushIntoInfill: boolean;               // default false
+  flushIntoSupport: boolean;              // default false
+
   // -- Support --
   supportEnabled: boolean;
   supportType: SupportType;
@@ -211,6 +232,19 @@ export interface PrintProfile {
   supportInterfaceSpacing: number;          // mm (ConfigOptionFloat, default: 0)
   supportInterfaceSpeed: number;            // mm/s (ConfigOptionFloat, default: 0 = auto)
   supportInterfaceBottomLayers: number;     // integer (ConfigOptionInt, default: 0)
+  supportExpansion: number;                  // mm (default 0)
+  supportCriticalRegionsOnly: boolean;       // default false
+  supportRemoveSmallOverhang: boolean;       // default true
+  bridgeNoSupport: boolean;                  // default false
+  maxBridgeLength: number;                   // mm (default 10)
+
+  // -- Tree Support --
+  treeSupportBranchDistance: number;       // mm (default 5)
+  treeSupportTipDiameter: number;          // mm (default 0.8)
+  treeSupportBranchDiameter: number;       // mm (default 2)
+  treeSupportBranchAngle: number;          // degrees (default 40)
+  treeSupportWallCount: number;            // int (default 0)
+  treeSupportAutoBrim: boolean;            // default true
 
   // -- Adhesion --
   adhesionType: AdhesionType;
@@ -221,6 +255,11 @@ export interface PrintProfile {
   brimEarsDetectionLength: number;       // mm
   brimEarsMaxAngle: number;              // degrees
   raftLayers: number;
+  raftContactDistance: number;             // mm (default 0.1)
+  raftExpansion: number;                   // mm (default 1.5)
+  raftFirstLayerDensity: number;           // percentage (default 90)
+  raftFirstLayerExpansion: number;         // mm (default 2)
+  brimObjectGap: number;                   // mm (default 0)
 
   // -- Retraction --
   retractionLength: number;              // mm
@@ -286,6 +325,13 @@ export interface PrintProfile {
   reduceInfillRetraction: boolean;      // config key: reduce_infill_retraction
   useFirmwareRetraction: boolean;       // config key: use_firmware_retraction
 
+  // Interlocking beam
+  interlockingBeam: boolean;               // default false
+  interlockingBeamWidth: number;           // mm (default 0.8)
+  interlockingOrientation: number;         // degrees (default 22.5)
+  interlockingBeamLayerCount: number;      // int (default 2)
+  interlockingDepth: number;               // mm (default 2)
+
   // Other advanced
   excludeObject: boolean;
   makeOverhangPrintable: boolean;
@@ -307,6 +353,9 @@ export interface PrintProfile {
 // ============================================================
 
 export const DEFAULT_PRINT_PROFILE: PrintProfile = {
+  // Print Sequence
+  printSequence: 'by_layer',
+
   // Quality
   layerHeight: 0.2,
   initialLayerPrintHeight: 0.3,
@@ -341,6 +390,15 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   scarfSteps: 10,
   scarfInnerWalls: false,
   scarfHasScarf: false,
+
+  // Compensation
+  elephantFootCompensation: 0,
+  elephantFootCompensationLayers: 1,
+  xyHoleCompensation: 0,
+  xyContourCompensation: 0,
+
+  // Slicing Mode
+  slicingMode: 'regular',
 
   // Walls
   wallLoops: 3,
@@ -434,6 +492,11 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   accelToDecelEnable: false,
   accelToDecelFactor: 50,
 
+  // Flush / Purge
+  flushIntoObjects: false,
+  flushIntoInfill: false,
+  flushIntoSupport: false,
+
   // Support
   supportEnabled: false,
   supportType: 'normal_auto',
@@ -449,6 +512,19 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   supportInterfaceSpacing: 0,
   supportInterfaceSpeed: 0,
   supportInterfaceBottomLayers: 0,
+  supportExpansion: 0,
+  supportCriticalRegionsOnly: false,
+  supportRemoveSmallOverhang: true,
+  bridgeNoSupport: false,
+  maxBridgeLength: 10,
+
+  // Tree Support
+  treeSupportBranchDistance: 5,
+  treeSupportTipDiameter: 0.8,
+  treeSupportBranchDiameter: 2,
+  treeSupportBranchAngle: 40,
+  treeSupportWallCount: 0,
+  treeSupportAutoBrim: true,
 
   // Adhesion
   adhesionType: 'skirt',
@@ -459,6 +535,11 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   brimEarsDetectionLength: 1,
   brimEarsMaxAngle: 125,
   raftLayers: 0,
+  raftContactDistance: 0.1,
+  raftExpansion: 1.5,
+  raftFirstLayerDensity: 90,
+  raftFirstLayerExpansion: 2,
+  brimObjectGap: 0,
 
   // Retraction
   retractionLength: 0.8,
@@ -522,6 +603,13 @@ export const DEFAULT_PRINT_PROFILE: PrintProfile = {
   // Retraction advanced
   reduceInfillRetraction: false,
   useFirmwareRetraction: false,
+
+  // Interlocking beam
+  interlockingBeam: false,
+  interlockingBeamWidth: 0.8,
+  interlockingOrientation: 22.5,
+  interlockingBeamLayerCount: 2,
+  interlockingDepth: 2,
 
   // Other advanced
   excludeObject: true,

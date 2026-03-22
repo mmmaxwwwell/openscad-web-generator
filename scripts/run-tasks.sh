@@ -19,14 +19,20 @@
 
 set -uo pipefail
 
-# Ensure Ctrl-C kills child processes too
-trap 'echo ""; echo "Interrupted."; kill 0 2>/dev/null; exit 130' INT TERM
-
 BLOCKED_FILE="agent-work/BLOCKED.md"
 PROMPT_FILE="${1:-}"
 MAX_RUNS="${2:-100}"
 LOG_DIR="agent-work/logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+CONSECUTIVE_FAILURES=0
+MAX_CONSECUTIVE_FAILURES=3
+BASE_BACKOFF=60        # 1 minute base backoff
+MAX_BACKOFF=1800       # 30 minute max backoff (Max plan resets are ~5-15 min)
+STDERR_FILE=$(mktemp)
+
+# Ensure Ctrl-C kills child processes too
+cleanup() { rm -f "$STDERR_FILE" 2>/dev/null; }
+trap 'echo ""; echo "Interrupted."; cleanup; kill 0 2>/dev/null; exit 130' INT TERM EXIT
 
 # Auto-detect prompt file if not specified
 if [ -z "$PROMPT_FILE" ]; then
@@ -99,7 +105,9 @@ log "Log:       $LOG_FILE"
 log "Remaining: $(count_remaining) tasks"
 log ""
 
-for i in $(seq 1 "$MAX_RUNS"); do
+RUN_NUM=0
+while [ $RUN_NUM -lt "$MAX_RUNS" ]; do
+  RUN_NUM=$((RUN_NUM + 1))
   REMAINING=$(count_remaining)
   COMPLETED=$(count_completed)
   BLOCKED=$(count_blocked)
@@ -111,20 +119,24 @@ for i in $(seq 1 "$MAX_RUNS"); do
     exit 0
   fi
 
-  log "--- Run $i/$MAX_RUNS (remaining: $REMAINING, completed: $COMPLETED, blocked: $BLOCKED) ---"
+  log "--- Run $RUN_NUM/$MAX_RUNS (remaining: $REMAINING, completed: $COMPLETED, blocked: $BLOCKED) ---"
 
   # Run claude with streaming JSON, parse in real-time with node
+  # Capture stderr separately for usage-limit detection
+  > "$STDERR_FILE"
   claude --dangerously-skip-permissions --model opus --verbose --output-format stream-json \
     -p "SKIP the ROUTER.md — do NOT read it or load any skills. Just read $PROMPT_FILE and follow its instructions exactly. Do NOT use the Skill tool." \
-    2>>"$LOG_FILE" | nix develop -c node -e '
+    2> >(tee -a "$LOG_FILE" >> "$STDERR_FILE") | nix develop -c node -e '
     const rl = require("readline").createInterface({ input: process.stdin });
     const fs = require("fs");
     const logFile = process.argv[1];
+    let gotContent = false;
     rl.on("line", (line) => {
       fs.appendFileSync(logFile, line + "\n");
       try {
         const msg = JSON.parse(line);
         if (msg.type === "assistant" && msg.message?.content) {
+          gotContent = true;
           for (const block of msg.message.content) {
             if (block.type === "text" && block.text) {
               process.stdout.write(block.text);
@@ -144,25 +156,68 @@ for i in $(seq 1 "$MAX_RUNS"); do
               process.stdout.write(`\n[${block.name}] ${detail}\n`);
             }
           }
+        } else if (msg.type === "error") {
+          const errMsg = msg.error?.message || msg.message || JSON.stringify(msg);
+          process.stderr.write("CLAUDE_ERROR: " + errMsg + "\n");
+          process.exit(2);
         } else if (msg.type === "result") {
           if (msg.result) process.stdout.write("\n" + msg.result + "\n");
           process.exit(msg.is_error ? 1 : 0);
         }
       } catch {}
     });
-    rl.on("close", () => process.exit(0));
+    rl.on("close", () => {
+      // If we got no content at all, likely a pre-conversation error (usage limit)
+      if (!gotContent) process.exit(2);
+      process.exit(0);
+    });
   ' "$LOG_FILE"
 
   EXIT_CODE=$?
-  if [ $EXIT_CODE -eq 0 ]; then
-    log "Run $i completed successfully"
-  else
-    log "Run $i exited with code $EXIT_CODE"
-    if [ $EXIT_CODE -gt 1 ]; then
-      log "Unexpected exit code $EXIT_CODE, stopping."
-      break
+  STDERR_CONTENT=$(cat "$STDERR_FILE" 2>/dev/null || true)
+
+  # Check for usage/rate limit indicators in stderr
+  USAGE_LIMITED=false
+  if echo "$STDERR_CONTENT" | grep -qiE 'rate.?limit|usage.?limit|too many|429|quota|capacity|overloaded|busy|try again'; then
+    USAGE_LIMITED=true
+  fi
+  # Also detect if claude exited very quickly with no content (sign of usage limit)
+  if [ $EXIT_CODE -ne 0 ] && [ $EXIT_CODE -ne 130 ] && ! echo "$STDERR_CONTENT" | grep -q "CLAUDE_ERROR"; then
+    # Check if the run was suspiciously short (< 10 seconds usually means it didn't even start)
+    if [ $EXIT_CODE -eq 2 ]; then
+      USAGE_LIMITED=true
     fi
-    # exit code 1 = non-fatal, continue to next run
+  fi
+
+  if [ $EXIT_CODE -eq 0 ]; then
+    log "Run $RUN_NUM completed successfully"
+    CONSECUTIVE_FAILURES=0
+  elif [ "$USAGE_LIMITED" = true ]; then
+    CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+    # Exponential backoff: 1min, 2min, 4min, ... up to 30min
+    BACKOFF=$(( BASE_BACKOFF * (2 ** (CONSECUTIVE_FAILURES - 1)) ))
+    if [ $BACKOFF -gt $MAX_BACKOFF ]; then
+      BACKOFF=$MAX_BACKOFF
+    fi
+    BACKOFF_MIN=$(( BACKOFF / 60 ))
+    RESUME_TIME=$(date -d "+${BACKOFF} seconds" '+%H:%M:%S' 2>/dev/null || date -v+${BACKOFF}S '+%H:%M:%S' 2>/dev/null || echo "~${BACKOFF_MIN}min")
+    log "⏳ Usage limit hit (attempt $CONSECUTIVE_FAILURES). Waiting ${BACKOFF_MIN}min (until ~$RESUME_TIME)..."
+    if echo "$STDERR_CONTENT" | head -5 | grep -iE 'rate|limit|usage|429|quota|capacity' ; then
+      log "  Error detail: $(echo "$STDERR_CONTENT" | grep -iE 'rate|limit|usage|429|quota|capacity' | head -1)"
+    fi
+    sleep "$BACKOFF"
+    log "Resuming after backoff..."
+    RUN_NUM=$((RUN_NUM - 1))  # Don't count usage-limited runs against MAX_RUNS
+    continue
+  else
+    CONSECUTIVE_FAILURES=$((CONSECUTIVE_FAILURES + 1))
+    log "Run $RUN_NUM exited with code $EXIT_CODE (consecutive failures: $CONSECUTIVE_FAILURES)"
+    if [ $CONSECUTIVE_FAILURES -ge $MAX_CONSECUTIVE_FAILURES ]; then
+      log "⚠️  $MAX_CONSECUTIVE_FAILURES consecutive failures. Likely persistent issue."
+      log "Waiting ${BASE_BACKOFF}s before retrying in case it's a transient usage limit..."
+      sleep "$BASE_BACKOFF"
+      CONSECUTIVE_FAILURES=0  # Reset and give it another chance
+    fi
   fi
 
   # Check if agent wrote BLOCKED.md (needs user input)
@@ -180,5 +235,5 @@ for i in $(seq 1 "$MAX_RUNS"); do
 done
 
 log ""
-log "=== Runner finished after $MAX_RUNS runs ==="
+log "=== Runner finished after $RUN_NUM runs ==="
 log "Remaining: $(count_remaining) | Completed: $(count_completed) | Blocked: $(count_blocked)"

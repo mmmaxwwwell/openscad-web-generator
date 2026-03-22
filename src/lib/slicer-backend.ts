@@ -8,6 +8,7 @@
  */
 
 import type { SliceResult } from '../hooks/useSlicer';
+import type { PlateObjectMsg } from '../workers/slicer-worker';
 import {
   isNativeSlicerAvailable,
   getNativeEngineName,
@@ -27,6 +28,13 @@ export interface SlicerBackend {
     input: ArrayBuffer,
     config: Record<string, string>,
     format: 'stl' | '3mf',
+    onProgress?: ProgressCallback,
+  ): Promise<SliceResult>;
+  /** Slice a multi-object build plate and return GCode + stats. */
+  slicePlate(
+    objects: PlateObjectMsg[],
+    globalConfig: Record<string, string>,
+    printSequence?: string,
     onProgress?: ProgressCallback,
   ): Promise<SliceResult>;
   /** Cancel an in-flight slicing operation (best-effort). */
@@ -115,6 +123,61 @@ class WasmSlicerBackend implements SlicerBackend {
     });
   }
 
+  slicePlate(
+    objects: PlateObjectMsg[],
+    globalConfig: Record<string, string>,
+    printSequence?: string,
+    onProgress?: ProgressCallback,
+  ): Promise<SliceResult> {
+    // Reject any in-flight operation
+    if (this.pending) {
+      this.pending.reject(new Error('Superseded by new slice request'));
+      this.pending = null;
+    }
+
+    const worker = this.getWorker();
+
+    return new Promise<SliceResult>((resolve, reject) => {
+      this.pending = { resolve, reject };
+
+      worker.onmessage = (e: MessageEvent) => {
+        const msg = e.data;
+        if (msg.type === 'progress') {
+          onProgress?.(msg.stage, msg.progress, msg.message);
+        } else if (msg.type === 'done') {
+          this.pending = null;
+          resolve({
+            gcode: msg.gcode,
+            printTime: msg.stats?.printTime,
+            filamentUsed: msg.stats?.filamentUsed,
+          });
+        } else if (msg.type === 'error') {
+          this.pending = null;
+          reject(new Error(msg.message));
+        }
+      };
+
+      worker.onerror = (e: ErrorEvent) => {
+        const message = e.message || 'Worker crashed';
+        this.pending = null;
+        this.worker = null;
+        reject(new Error(message));
+      };
+
+      // Clone object data buffers before transfer so originals stay valid
+      // (the canvas still references them for rendering)
+      const clonedObjects = objects.map(obj => ({
+        ...obj,
+        data: obj.data.slice(0),
+      }));
+      const transfers = clonedObjects.map(obj => obj.data);
+      worker.postMessage(
+        { type: 'slicePlate', objects: clonedObjects, globalConfig, printSequence },
+        transfers,
+      );
+    });
+  }
+
   cancel(): void {
     if (this.worker) {
       this.worker.postMessage({ type: 'cancel' });
@@ -159,6 +222,15 @@ class NativeSlicerBackend implements SlicerBackend {
       this.activeCallbackId = null;
       return result;
     });
+  }
+
+  slicePlate(
+    _objects: PlateObjectMsg[],
+    _globalConfig: Record<string, string>,
+    _printSequence?: string,
+    _onProgress?: ProgressCallback,
+  ): Promise<SliceResult> {
+    return Promise.reject(new Error('Multi-object plate slicing is not supported on the native Android backend'));
   }
 
   cancel(): void {

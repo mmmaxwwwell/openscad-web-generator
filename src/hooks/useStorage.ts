@@ -1,36 +1,33 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { StorageAdapter, FileInfo } from '../types';
-import { createStorage, type StorageConfig } from '../lib/storage';
+import { createStorage } from '../lib/storage';
 
 interface UseStorageResult {
   adapter: StorageAdapter | null;
   files: FileInfo[];
   loading: boolean;
   error: string | null;
-  refresh: () => Promise<void>;
   loadFile: (id: string) => Promise<string>;
   saveFile: (id: string, content: string) => Promise<void>;
   deleteFile: (id: string) => Promise<void>;
 }
 
-export function useStorage(config: StorageConfig): UseStorageResult {
+export function useStorage(): UseStorageResult {
   const [adapter, setAdapter] = useState<StorageAdapter | null>(null);
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const configRef = useRef(config);
 
-  // Re-initialize adapter when config changes
+  // Initialize adapter once
   useEffect(() => {
-    configRef.current = config;
     let cancelled = false;
 
     async function init() {
       setLoading(true);
       setError(null);
       try {
-        const newAdapter = await createStorage(config);
+        const newAdapter = await createStorage();
         if (cancelled) return;
         setAdapter(newAdapter);
         const fileList = await newAdapter.listFiles();
@@ -46,7 +43,7 @@ export function useStorage(config: StorageConfig): UseStorageResult {
 
     init();
     return () => { cancelled = true; };
-  }, [config.backend, config.backend === 's3' ? JSON.stringify(config.s3) : '']);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!adapter) return;
@@ -79,5 +76,5 @@ export function useStorage(config: StorageConfig): UseStorageResult {
     await refresh();
   }, [adapter, refresh]);
 
-  return { adapter, files, loading, error, refresh, loadFile, saveFile, deleteFile };
+  return { adapter, files, loading, error, loadFile, saveFile, deleteFile };
 }

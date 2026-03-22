@@ -29,6 +29,13 @@ interface WasmSlicerInstance {
   setConfigString(key: string, value: string): void;
   slice(): void;
   exportGCode(): string;
+  // Multi-object Build Plate API
+  clearModel(): void;
+  addSTLObject(path: string, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
+  add3MFObject(path: string, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
+  setObjectConfig(objectIndex: number, key: string, value: string): void;
+  setPrintSequence(mode: string): void;
+  getObjectCount(): number;
   /** embind destructor — must be called to free C++ memory */
   delete(): void;
 }
@@ -71,6 +78,21 @@ export interface SlicerEngine {
   exportGCode(): string;
   /** Release all C++ resources. The engine cannot be used after this. */
   destroy(): void;
+
+  // --- Multi-object Build Plate API ---
+
+  /** Clear the model, removing all objects. Resets state for a fresh plate. */
+  clearModel(): void;
+  /** Add an STL object to the plate. Returns the 0-based object index. */
+  addSTLObject(buffer: ArrayBuffer | Uint8Array, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
+  /** Add a 3MF object to the plate (multi-color volumes merged). Returns the 0-based object index. */
+  add3MFObject(buffer: ArrayBuffer | Uint8Array, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
+  /** Set per-object config overrides. Only keys that differ from global config need to be set. */
+  setObjectConfig(objectIndex: number, entries: Record<string, string>): void;
+  /** Set print sequence mode: 'by layer' or 'by object'. */
+  setPrintSequence(mode: string): void;
+  /** Return the number of objects currently on the plate. */
+  getObjectCount(): number;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +416,74 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
       if (slicer) {
         slicer.delete();
         slicer = null;
+      }
+    },
+
+    // --- Multi-object Build Plate API ---
+
+    clearModel(): void {
+      try {
+        getSlicer().clearModel();
+      } catch (e: unknown) {
+        throw decodeWasmException(e, 'clearModel');
+      }
+    },
+
+    addSTLObject(buffer: ArrayBuffer | Uint8Array, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number {
+      const path = writeToVFS(module.FS, buffer, '.stl');
+      try {
+        return getSlicer().addSTLObject(path, posX, posY, rotZ, scaleX, scaleY, scaleZ);
+      } catch (e: unknown) {
+        throw decodeWasmException(e, 'addSTLObject');
+      } finally {
+        try { module.FS.unlink(path); } catch { /* ignore cleanup errors */ }
+      }
+    },
+
+    add3MFObject(buffer: ArrayBuffer | Uint8Array, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number {
+      const path = writeToVFS(module.FS, buffer, '.3mf');
+      try {
+        return getSlicer().add3MFObject(path, posX, posY, rotZ, scaleX, scaleY, scaleZ);
+      } catch (e: unknown) {
+        throw decodeWasmException(e, 'add3MFObject');
+      } finally {
+        try { module.FS.unlink(path); } catch { /* ignore cleanup errors */ }
+      }
+    },
+
+    setObjectConfig(objectIndex: number, entries: Record<string, string>): void {
+      const s = getSlicer();
+      for (const [key, value] of Object.entries(entries)) {
+        try {
+          s.setObjectConfig(objectIndex, key, value);
+        } catch (e: unknown) {
+          const decoded = decodeWasmException(e, `setObjectConfig(${objectIndex}, ${key}=${value})`);
+          // Log and skip unrecognized keys, same pattern as setConfig
+          if (decoded.message.includes('BadOptionValueException') ||
+              decoded.message.includes('UnknownOptionException') ||
+              decoded.message.includes('Invalid value') ||
+              decoded.message.includes('out of range')) {
+            console.warn(`[slicer-engine] Skipping per-object config key="${key}" value="${value}": ${decoded.message}`);
+          } else {
+            throw decoded;
+          }
+        }
+      }
+    },
+
+    setPrintSequence(mode: string): void {
+      try {
+        getSlicer().setPrintSequence(mode);
+      } catch (e: unknown) {
+        throw decodeWasmException(e, 'setPrintSequence');
+      }
+    },
+
+    getObjectCount(): number {
+      try {
+        return getSlicer().getObjectCount();
+      } catch (e: unknown) {
+        throw decodeWasmException(e, 'getObjectCount');
       }
     },
   };

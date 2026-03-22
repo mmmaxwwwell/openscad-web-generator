@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSlicerBackend } from '../lib/slicer-backend';
 import type { SlicerBackend } from '../lib/slicer-backend';
+import type { PlateObjectMsg } from '../workers/slicer-worker';
 
 export type SlicerStatus = 'idle' | 'loading' | 'ready' | 'slicing' | 'error';
 
@@ -48,6 +49,17 @@ export interface UseSlicerResult {
     stlData: ArrayBuffer,
     config?: Record<string, string>,
     threeMfData?: ArrayBuffer,
+  ) => Promise<SliceResult>;
+  /**
+   * Slice a multi-object build plate into GCode.
+   * @param objects - Array of plate objects with mesh data, transforms, and per-object config
+   * @param globalConfig - OrcaSlicer config key/value pairs for plate-level settings
+   * @param printSequence - Optional "by layer" or "by object"
+   */
+  slicePlate: (
+    objects: PlateObjectMsg[],
+    globalConfig: Record<string, string>,
+    printSequence?: string,
   ) => Promise<SliceResult>;
   /** Cancel an in-flight slicing operation */
   cancel: () => void;
@@ -197,6 +209,61 @@ export function useSlicer(): UseSlicerResult {
     });
   }, [getBackend]);
 
+  const slicePlate = useCallback(async (
+    objects: PlateObjectMsg[],
+    globalConfig: Record<string, string>,
+    printSequence?: string,
+  ): Promise<SliceResult> => {
+    // Reject any in-flight operation
+    if (pendingRef.current) {
+      pendingRef.current.reject(new Error('Superseded by new slice request'));
+      pendingRef.current = null;
+    }
+
+    if (mountedRef.current) {
+      setStatus('slicing');
+      setError(null);
+      setProgress({ stage: 'parsing', progress: 0 });
+      setDebugLog([]);
+    }
+
+    const backend = getBackend();
+
+    return new Promise<SliceResult>((resolve, reject) => {
+      pendingRef.current = { resolve, reject };
+
+      backend.slicePlate(
+        objects,
+        globalConfig,
+        printSequence,
+        (stage, prog, message) => {
+          if (!mountedRef.current) return;
+          const mappedStage = mapStage(stage);
+          setProgress({ stage: mappedStage, progress: prog, message });
+          const logEntry = message
+            ? `[${stage}] ${message}`
+            : `[${stage}] ${Math.round(prog * 100)}%`;
+          setDebugLog(prev => [...prev, logEntry]);
+        },
+      ).then(result => {
+        if (!mountedRef.current) return;
+        setStatus('ready');
+        setProgress(null);
+        pendingRef.current = null;
+        resolve(result);
+      }).catch(err => {
+        if (!mountedRef.current) return;
+        const message = err instanceof Error ? err.message : String(err);
+        setStatus('error');
+        setError(message);
+        setProgress(null);
+        setDebugLog(prev => [...prev, `ERROR: ${message}`]);
+        pendingRef.current = null;
+        reject(err);
+      });
+    });
+  }, [getBackend]);
+
   const cancel = useCallback(() => {
     if (backendRef.current) {
       backendRef.current.cancel();
@@ -227,5 +294,5 @@ export function useSlicer(): UseSlicerResult {
     setDebugLog([]);
   }, []);
 
-  return { status, error, progress, debugLog, engineName, slice, cancel, reset };
+  return { status, error, progress, debugLog, engineName, slice, slicePlate, cancel, reset };
 }

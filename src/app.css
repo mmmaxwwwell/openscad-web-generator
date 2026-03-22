@@ -591,37 +591,6 @@ input:focus, select:focus {
   word-break: break-all;
 }
 
-/* ─── S3 Configuration ─────────────────────────────── */
-.s3-config {
-  margin-top: 1rem;
-  padding: 1rem;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-}
-
-.s3-config h3 {
-  margin-bottom: 0.75rem;
-}
-
-.s3-config-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.s3-config-fields label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.s3-config-fields input {
-  width: 100%;
-}
-
 /* ─── Toast ───────────────────────────────────────── */
 .toast {
   position: fixed;
@@ -678,6 +647,41 @@ input:focus, select:focus {
 }
 
 /* ─── Printer Settings Button ─────────────────────── */
+.file-screen-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.build-plate-open-btn {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid #4a90d9;
+  background: #4a90d9;
+  color: #fff;
+  cursor: pointer;
+}
+
+.build-plate-open-btn:hover {
+  background: #357abd;
+}
+
+.export-build-plate-btn {
+  font-size: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 3px;
+  border: 1px solid #4a90d9;
+  background: transparent;
+  color: #4a90d9;
+  cursor: pointer;
+}
+
+.export-build-plate-btn:hover {
+  background: #4a90d9;
+  color: #fff;
+}
+
 .printer-settings-btn {
   margin-left: auto;
   font-size: 0.85rem;
@@ -1289,6 +1293,42 @@ input:focus, select:focus {
   margin: 0.25rem 0 0;
 }
 
+/* ─── Override Indicators (per-object settings) ─── */
+.print-dialog-field.override-active {
+  border-left: 3px solid #4fc3f7;
+  padding-left: 0.4rem;
+  background: rgba(79, 195, 247, 0.06);
+  border-radius: 2px;
+}
+
+.print-dialog-field.override-inherited {
+  opacity: 0.55;
+}
+
+.override-reset-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 4px;
+  font-size: 11px;
+  line-height: 1;
+  border: 1px solid #4fc3f7;
+  border-radius: 50%;
+  background: transparent;
+  color: #4fc3f7;
+  cursor: pointer;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.override-reset-btn:hover {
+  background: #4fc3f7;
+  color: #fff;
+}
+
 .print-dialog-details {
   border: 1px solid #444;
   border-radius: 4px;
@@ -1579,10 +1619,6 @@ input:focus, select:focus {
   .file-list-item {
     padding: 0.5rem;
     gap: 0.5rem;
-  }
-
-  .s3-config {
-    padding: 0.75rem;
   }
 
   .toast {
@@ -2066,4 +2102,985 @@ input:focus, select:focus {
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.7);
   margin-bottom: 0.5rem;
+}
+
+/* ─── Build Plate View ─────────────────────────────── */
+.build-plate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #f5f5f5;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.build-plate-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 1.1rem;
+  color: #666;
+}
+
+.build-plate-view {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.build-plate-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+.build-plate-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.build-plate-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.build-plate-object-count {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.build-plate-close {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  color: #666;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.build-plate-close:hover {
+  color: #333;
+}
+
+.build-plate-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Left sidebar: objects + settings */
+.build-plate-sidebar {
+  width: 280px;
+  min-width: 280px;
+  background: #fff;
+  border-right: 1px solid #ddd;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* ─── Collapsible section toggle ────────────────── */
+.build-plate-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border: none;
+  border-bottom: 1px solid #eee;
+  background: #fafafa;
+  cursor: pointer;
+  text-align: left;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+.build-plate-section-toggle:hover {
+  background: #f0f0f0;
+}
+
+.build-plate-section-arrow {
+  font-size: 0.6rem;
+  transition: transform 0.15s ease;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.build-plate-section-arrow--open {
+  transform: rotate(90deg);
+}
+
+.build-plate-sidebar-section-body {
+  padding: 0.75rem;
+  border-bottom: 1px solid #eee;
+}
+
+.build-plate-sidebar-header {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #eee;
+}
+
+.build-plate-empty {
+  padding: 1rem 0.75rem;
+  font-size: 0.85rem;
+  color: #999;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.build-plate-object-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.build-plate-object-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.85rem;
+  min-height: 44px;
+}
+
+.build-plate-object-item:hover {
+  background: #f5f5ff;
+}
+
+.build-plate-object-item--selected {
+  background: #e8f0fe;
+  border-left: 3px solid #4a90d9;
+}
+
+.build-plate-object-type-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #e0e0e0;
+  color: #555;
+  flex-shrink: 0;
+}
+
+.build-plate-object-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.build-plate-object-colors {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 4px;
+  align-items: center;
+}
+
+.build-plate-color-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.build-plate-object-override-badge {
+  color: #e67e22;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+/* Center: toolbar + canvas */
+.build-plate-center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.build-plate-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: #fff;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.build-plate-toolbar-group {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.build-plate-toolbar-right {
+  margin-left: auto;
+}
+
+.build-plate-btn {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.8rem;
+  border: 1px solid #ccc;
+  background: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.build-plate-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  border-color: #aaa;
+}
+
+.build-plate-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.build-plate-btn--active {
+  background: #e8f0fe;
+  border-color: #4a90d9;
+  color: #2962b0;
+}
+
+.build-plate-btn--primary {
+  background: #4a90d9;
+  color: #fff;
+  border-color: #3a7bc8;
+  font-weight: 600;
+}
+
+.build-plate-btn--primary:hover:not(:disabled) {
+  background: #3a7bc8;
+}
+
+.build-plate-btn--small {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  min-height: auto;
+}
+
+.build-plate-canvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  position: relative;
+}
+
+.build-plate-transform-overlay {
+  position: absolute;
+  bottom: 8px;
+  left: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 12px;
+  pointer-events: none;
+  line-height: 1.6;
+  z-index: 5;
+}
+
+.build-plate-canvas-container {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #1a1a2e;
+}
+
+.build-plate-canvas-container--drag-over {
+  outline: 3px dashed #4ecdc4;
+  outline-offset: -3px;
+}
+
+.build-plate-array-popover {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: #2a2a3e;
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+
+.build-plate-array-popover label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+  color: #ccc;
+}
+
+.build-plate-array-popover input {
+  width: 50px;
+}
+
+.build-plate-array-popover-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.build-plate-scad-picker-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 20;
+}
+
+.build-plate-scad-picker {
+  background: #2a2a3e;
+  border: 1px solid #555;
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 260px;
+  max-width: 360px;
+}
+
+.build-plate-scad-picker h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  color: #eee;
+}
+
+.build-plate-scad-multicolor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 0.85rem;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.build-plate-scad-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.build-plate-scad-picker-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  text-align: left;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #ddd;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.build-plate-scad-picker-item:hover {
+  background: #3a3a5e;
+  border-color: #4ecdc4;
+  color: #fff;
+}
+
+.build-plate-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(78, 205, 196, 0.15);
+  color: #4ecdc4;
+  font-size: 1.2rem;
+  font-weight: 600;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.build-plate-rendering-overlay {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.7);
+  color: #4ecdc4;
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.build-plate-scad-error {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(180, 40, 40, 0.9);
+  color: #fff;
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.build-plate-scad-error button {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+/* SCAD params section in right panel */
+.build-plate-scad-params-section {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.build-plate-scad-params-section h4 {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.build-plate-scad-params-section .param-editor {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.build-plate-scad-params-section .param-editor h3 {
+  display: none;
+}
+
+.build-plate-rerender-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.build-plate-rerender-error {
+  margin-top: 6px;
+  background: rgba(180, 40, 40, 0.1);
+  color: #b42828;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.build-plate-rerender-error button {
+  background: rgba(180, 40, 40, 0.15);
+  border: none;
+  color: #b42828;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+/* Right panel: settings */
+
+.build-plate-object-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.build-plate-plate-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.build-plate-transform-section {
+  margin-bottom: 1rem;
+}
+
+.build-plate-transform-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.build-plate-transform-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+}
+
+.build-plate-transform-grid label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: #666;
+  gap: 2px;
+}
+
+.build-plate-transform-grid input {
+  width: 100%;
+  padding: 0.3rem;
+  font-size: 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.build-plate-overrides-section {
+  margin-bottom: 1rem;
+}
+
+.build-plate-overrides-section h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.build-plate-override-hint {
+  font-size: 0.8rem;
+  color: #888;
+  margin: 0 0 0.5rem;
+  line-height: 1.4;
+}
+
+/* ─── Build Plate Settings Tabs ─────────────────── */
+
+.build-plate-settings-tabs {
+  margin-top: 0.75rem;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 0.5rem;
+}
+
+.build-plate-settings-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.build-plate-settings-tab {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.7rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  background: #f5f5f5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.build-plate-settings-tab:hover {
+  background: #e8e8e8;
+}
+
+.build-plate-settings-tab--active {
+  background: #4a9eff;
+  color: #fff;
+  border-color: #3a8eef;
+}
+
+.build-plate-settings-tab-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.build-plate-override-summary {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.5rem;
+  background: #f8f8f8;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.build-plate-override-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.build-plate-override-summary-row span {
+  color: #666;
+}
+
+.build-plate-scale-section {
+  margin-top: 0.5rem;
+}
+
+.build-plate-scale-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.build-plate-uniform-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.build-plate-uniform-toggle input[type="checkbox"] {
+  margin: 0;
+}
+
+.build-plate-extruder-section {
+  margin-bottom: 0.75rem;
+}
+
+.build-plate-extruder-section h4 {
+  margin: 0 0 0.3rem;
+  font-size: 0.8rem;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.build-plate-extruder-section select {
+  width: 100%;
+  padding: 0.3rem;
+  font-size: 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+}
+
+/* Responsive: narrow screens */
+@media (max-width: 768px) {
+  .build-plate-body {
+    flex-direction: column;
+  }
+
+  .build-plate-sidebar {
+    width: 100%;
+    min-width: 100%;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+  }
+}
+
+/* ─── Prime Tower Config ────────────────────────── */
+
+.build-plate-prime-tower-config {
+  margin-bottom: 12px;
+}
+
+.build-plate-prime-tower-config h4 {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.build-plate-prime-tower-config .print-dialog-field {
+  margin-bottom: 6px;
+}
+
+.build-plate-prime-tower-config .print-dialog-field label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.build-plate-prime-tower-config .print-dialog-field label span {
+  min-width: 100px;
+  font-size: 12px;
+  color: #666;
+}
+
+.build-plate-prime-tower-config .print-dialog-field input[type="number"] {
+  width: 70px;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.build-plate-prime-tower-warnings {
+  margin-top: 8px;
+}
+
+.build-plate-prime-tower-warning {
+  padding: 4px 8px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #856404;
+  margin-bottom: 4px;
+}
+
+/* ─── Flush Volume Matrix ───────────────────────── */
+.build-plate-flush-volumes {
+  padding: 8px 0;
+}
+
+.build-plate-flush-volumes h4 {
+  margin: 0 0 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.flush-volume-matrix {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.flush-volume-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.flush-volume-table th,
+.flush-volume-table td {
+  padding: 3px;
+  text-align: center;
+  border: 1px solid #444;
+}
+
+.flush-volume-corner {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+}
+
+.flush-volume-header,
+.flush-volume-row-header {
+  font-weight: 600;
+  background: #2a2a3e;
+  min-width: 36px;
+}
+
+.flush-volume-color-dot {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #666;
+  vertical-align: middle;
+}
+
+.flush-volume-cell {
+  padding: 2px;
+}
+
+.flush-volume-cell--diagonal {
+  background: #1a1a2e;
+}
+
+.flush-volume-diagonal {
+  color: #555;
+}
+
+.flush-volume-input {
+  width: 56px;
+  padding: 2px 4px;
+  font-size: 12px;
+  text-align: center;
+  background: #2a2a3e;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: inherit;
+}
+
+.flush-volume-input:focus {
+  border-color: #4fc3f7;
+  outline: none;
+}
+
+.flush-volume-multiplier {
+  margin-top: 8px;
+}
+
+.flush-volume-multiplier label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.flush-volume-multiplier label span {
+  flex: 1;
+  font-size: 12px;
+}
+
+.flush-volume-multiplier input[type="number"] {
+  width: 64px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: #2a2a3e;
+  border: 1px solid #555;
+  border-radius: 3px;
+  color: inherit;
+}
+
+.flush-volume-reset {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+/* ── Build Plate: Slicing ─────────────────────────────── */
+
+.build-plate-validation-errors {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(180, 120, 20, 0.9);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  z-index: 10;
+  max-width: 90%;
+}
+
+.build-plate-validation-error {
+  margin-bottom: 4px;
+}
+
+.build-plate-validation-errors button {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.build-plate-slice-progress {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  padding: 16px 24px;
+  border-radius: 8px;
+  z-index: 10;
+  text-align: center;
+  min-width: 200px;
+}
+
+.build-plate-slice-progress-label {
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+
+.build-plate-slice-progress-bar {
+  height: 6px;
+  background: #333;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.build-plate-slice-progress-fill {
+  height: 100%;
+  background: #4fc3f7;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.build-plate-slice-result {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+
+.build-plate-slice-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #333;
+}
+
+.build-plate-slice-result-header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.build-plate-slice-stats {
+  display: flex;
+  gap: 16px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.build-plate-gcode-preview {
+  flex: 1;
+  min-height: 300px;
+  position: relative;
+}
+
+.build-plate-preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #888;
+  font-size: 13px;
+}
+
+.build-plate-slice-actions {
+  padding: 8px 12px;
+  border-top: 1px solid #333;
+}
+
+.build-plate-upload-error {
+  margin-top: 6px;
+  color: #f44;
+  font-size: 12px;
 }

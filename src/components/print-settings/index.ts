@@ -8,6 +8,7 @@ export { AdhesionTab } from './AdhesionTab';
 export { CoolingTab } from './CoolingTab';
 export { RetractionTab } from './RetractionTab';
 export { AdvancedTab } from './AdvancedTab';
+export { createOverrideHelpers } from './override-helpers';
 export type { PrintSettingsTabProps } from './QualityTab';
 export type { SpeedTabProps } from './SpeedTab';
 export type { CoolingTabProps } from './CoolingTab';

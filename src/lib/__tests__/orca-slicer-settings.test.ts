@@ -868,6 +868,64 @@ describe('Support', () => {
     expect(buildWithProfile({ supportInterfaceBottomLayers: 0 })['support_interface_bottom_layers']).toBe('0');
     expect(buildWithProfile({ supportInterfaceBottomLayers: 3 })['support_interface_bottom_layers']).toBe('3');
   });
+
+  it('maps supportExpansion to support_expansion', () => {
+    expect(buildWithProfile({ supportExpansion: 0 })['support_expansion']).toBe('0');
+    expect(buildWithProfile({ supportExpansion: 3.5 })['support_expansion']).toBe('3.5');
+  });
+
+  it('maps supportCriticalRegionsOnly to support_critical_regions_only', () => {
+    expect(buildWithProfile({ supportCriticalRegionsOnly: true })['support_critical_regions_only']).toBe('1');
+    expect(buildWithProfile({ supportCriticalRegionsOnly: false })['support_critical_regions_only']).toBe('0');
+  });
+
+  it('maps supportRemoveSmallOverhang to support_remove_small_overhang', () => {
+    expect(buildWithProfile({ supportRemoveSmallOverhang: true })['support_remove_small_overhang']).toBe('1');
+    expect(buildWithProfile({ supportRemoveSmallOverhang: false })['support_remove_small_overhang']).toBe('0');
+  });
+
+  it('maps bridgeNoSupport to bridge_no_support', () => {
+    expect(buildWithProfile({ bridgeNoSupport: true })['bridge_no_support']).toBe('1');
+    expect(buildWithProfile({ bridgeNoSupport: false })['bridge_no_support']).toBe('0');
+  });
+
+  it('maps maxBridgeLength to max_bridge_length', () => {
+    expect(buildWithProfile({ maxBridgeLength: 10 })['max_bridge_length']).toBe('10');
+    expect(buildWithProfile({ maxBridgeLength: 0 })['max_bridge_length']).toBe('0');
+    expect(buildWithProfile({ maxBridgeLength: 25.5 })['max_bridge_length']).toBe('25.5');
+  });
+
+  it('maps treeSupportBranchDistance to tree_support_branch_distance', () => {
+    expect(buildWithProfile({ treeSupportBranchDistance: 5 })['tree_support_branch_distance']).toBe('5');
+    expect(buildWithProfile({ treeSupportBranchDistance: 0 })['tree_support_branch_distance']).toBe('0');
+    expect(buildWithProfile({ treeSupportBranchDistance: 12.5 })['tree_support_branch_distance']).toBe('12.5');
+  });
+
+  it('maps treeSupportTipDiameter to tree_support_tip_diameter', () => {
+    expect(buildWithProfile({ treeSupportTipDiameter: 0.8 })['tree_support_tip_diameter']).toBe('0.8');
+    expect(buildWithProfile({ treeSupportTipDiameter: 0.4 })['tree_support_tip_diameter']).toBe('0.4');
+  });
+
+  it('maps treeSupportBranchDiameter to tree_support_branch_diameter', () => {
+    expect(buildWithProfile({ treeSupportBranchDiameter: 2 })['tree_support_branch_diameter']).toBe('2');
+    expect(buildWithProfile({ treeSupportBranchDiameter: 5 })['tree_support_branch_diameter']).toBe('5');
+  });
+
+  it('maps treeSupportBranchAngle to tree_support_branch_angle as integer', () => {
+    expect(buildWithProfile({ treeSupportBranchAngle: 40 })['tree_support_branch_angle']).toBe('40');
+    expect(buildWithProfile({ treeSupportBranchAngle: 0 })['tree_support_branch_angle']).toBe('0');
+    expect(buildWithProfile({ treeSupportBranchAngle: 60 })['tree_support_branch_angle']).toBe('60');
+  });
+
+  it('maps treeSupportWallCount to tree_support_wall_count as integer', () => {
+    expect(buildWithProfile({ treeSupportWallCount: 0 })['tree_support_wall_count']).toBe('0');
+    expect(buildWithProfile({ treeSupportWallCount: 2 })['tree_support_wall_count']).toBe('2');
+  });
+
+  it('maps treeSupportAutoBrim to tree_support_auto_brim', () => {
+    expect(buildWithProfile({ treeSupportAutoBrim: true })['tree_support_auto_brim']).toBe('1');
+    expect(buildWithProfile({ treeSupportAutoBrim: false })['tree_support_auto_brim']).toBe('0');
+  });
 });
 
 // ================================================================
@@ -945,6 +1003,59 @@ describe('Adhesion', () => {
     expect(c['brim_type']).toBe('no_brim');
     expect(c['brim_width']).toBe('0');
     expect(c['raft_layers']).toBe('0');
+  });
+
+  it('maps raftContactDistance to raft_contact_distance when adhesionType is raft', () => {
+    const c = buildWithProfile({ adhesionType: 'raft', raftLayers: 2, raftContactDistance: 0.15 });
+    expect(c['raft_contact_distance']).toBe('0.15');
+  });
+
+  it('maps raftExpansion to raft_expansion when adhesionType is raft', () => {
+    const c = buildWithProfile({ adhesionType: 'raft', raftLayers: 2, raftExpansion: 3 });
+    expect(c['raft_expansion']).toBe('3');
+  });
+
+  it('maps raftFirstLayerDensity to raft_first_layer_density with % when adhesionType is raft', () => {
+    const c = buildWithProfile({ adhesionType: 'raft', raftLayers: 2, raftFirstLayerDensity: 90 });
+    expect(c['raft_first_layer_density']).toBe('90%');
+  });
+
+  it('maps raftFirstLayerExpansion to raft_first_layer_expansion when adhesionType is raft', () => {
+    const c = buildWithProfile({ adhesionType: 'raft', raftLayers: 2, raftFirstLayerExpansion: 2 });
+    expect(c['raft_first_layer_expansion']).toBe('2');
+  });
+
+  it('does not emit raft fields when adhesionType is not raft', () => {
+    const c = buildWithProfile({ adhesionType: 'skirt' });
+    expect(c['raft_contact_distance']).toBeUndefined();
+    expect(c['raft_expansion']).toBeUndefined();
+    expect(c['raft_first_layer_density']).toBeUndefined();
+    expect(c['raft_first_layer_expansion']).toBeUndefined();
+  });
+
+  it('maps brimObjectGap to brim_object_gap when adhesionType is brim', () => {
+    const c = buildWithProfile({ adhesionType: 'brim', brimObjectGap: 0.5 });
+    expect(c['brim_object_gap']).toBe('0.5');
+  });
+
+  it('maps brimObjectGap default 0 when adhesionType is brim', () => {
+    const c = buildWithProfile({ adhesionType: 'brim', brimObjectGap: 0 });
+    expect(c['brim_object_gap']).toBe('0');
+  });
+
+  it('maps raft edge cases: min density, zero expansion', () => {
+    const c = buildWithProfile({
+      adhesionType: 'raft',
+      raftLayers: 2,
+      raftContactDistance: 0,
+      raftExpansion: 0,
+      raftFirstLayerDensity: 10,
+      raftFirstLayerExpansion: 0,
+    });
+    expect(c['raft_contact_distance']).toBe('0');
+    expect(c['raft_expansion']).toBe('0');
+    expect(c['raft_first_layer_density']).toBe('10%');
+    expect(c['raft_first_layer_expansion']).toBe('0');
   });
 });
 
@@ -1760,6 +1871,152 @@ describe('convertKlipperToOrcaGcode', () => {
 });
 
 // ================================================================
+// PRINT SEQUENCE
+// ================================================================
+
+describe('Print Sequence', () => {
+  it('maps printSequence by_layer to "by layer" (with space)', () => {
+    expect(buildWithProfile({ printSequence: 'by_layer' })['print_sequence']).toBe('by layer');
+  });
+
+  it('maps printSequence by_object to "by object" (with space)', () => {
+    expect(buildWithProfile({ printSequence: 'by_object' })['print_sequence']).toBe('by object');
+  });
+
+  it('defaults to "by layer"', () => {
+    expect(buildWithProfile({})['print_sequence']).toBe('by layer');
+  });
+});
+
+// ================================================================
+// COMPENSATION
+// ================================================================
+
+describe('Compensation', () => {
+  it('maps elephantFootCompensation to elefant_foot_compensation', () => {
+    expect(buildWithProfile({ elephantFootCompensation: 0 })['elefant_foot_compensation']).toBe('0');
+    expect(buildWithProfile({ elephantFootCompensation: 0.2 })['elefant_foot_compensation']).toBe('0.2');
+  });
+
+  it('maps elephantFootCompensationLayers to elefant_foot_compensation_layers as integer', () => {
+    expect(buildWithProfile({ elephantFootCompensationLayers: 1 })['elefant_foot_compensation_layers']).toBe('1');
+    expect(buildWithProfile({ elephantFootCompensationLayers: 3 })['elefant_foot_compensation_layers']).toBe('3');
+  });
+
+  it('rounds elephantFootCompensationLayers to integer', () => {
+    expect(buildWithProfile({ elephantFootCompensationLayers: 2.7 })['elefant_foot_compensation_layers']).toBe('3');
+  });
+
+  it('maps xyHoleCompensation to xy_hole_compensation', () => {
+    expect(buildWithProfile({ xyHoleCompensation: 0 })['xy_hole_compensation']).toBe('0');
+    expect(buildWithProfile({ xyHoleCompensation: 0.1 })['xy_hole_compensation']).toBe('0.1');
+    expect(buildWithProfile({ xyHoleCompensation: -0.05 })['xy_hole_compensation']).toBe('-0.05');
+  });
+
+  it('maps xyContourCompensation to xy_contour_compensation', () => {
+    expect(buildWithProfile({ xyContourCompensation: 0 })['xy_contour_compensation']).toBe('0');
+    expect(buildWithProfile({ xyContourCompensation: 0.1 })['xy_contour_compensation']).toBe('0.1');
+    expect(buildWithProfile({ xyContourCompensation: -0.1 })['xy_contour_compensation']).toBe('-0.1');
+  });
+});
+
+// ================================================================
+// SLICING MODE
+// ================================================================
+
+describe('Slicing Mode', () => {
+  it('maps slicingMode regular', () => {
+    expect(buildWithProfile({ slicingMode: 'regular' })['slicing_mode']).toBe('regular');
+  });
+
+  it('maps slicingMode even_odd', () => {
+    expect(buildWithProfile({ slicingMode: 'even_odd' })['slicing_mode']).toBe('even_odd');
+  });
+
+  it('maps slicingMode close_holes', () => {
+    expect(buildWithProfile({ slicingMode: 'close_holes' })['slicing_mode']).toBe('close_holes');
+  });
+
+  it('defaults to regular', () => {
+    expect(buildWithProfile({})['slicing_mode']).toBe('regular');
+  });
+});
+
+// ================================================================
+// FLUSH INTO SETTINGS
+// ================================================================
+
+describe('Flush Into Settings', () => {
+  it('maps flushIntoObjects to flush_into_objects', () => {
+    expect(buildWithProfile({ flushIntoObjects: true })['flush_into_objects']).toBe('1');
+    expect(buildWithProfile({ flushIntoObjects: false })['flush_into_objects']).toBe('0');
+  });
+
+  it('maps flushIntoInfill to flush_into_infill', () => {
+    expect(buildWithProfile({ flushIntoInfill: true })['flush_into_infill']).toBe('1');
+    expect(buildWithProfile({ flushIntoInfill: false })['flush_into_infill']).toBe('0');
+  });
+
+  it('maps flushIntoSupport to flush_into_support', () => {
+    expect(buildWithProfile({ flushIntoSupport: true })['flush_into_support']).toBe('1');
+    expect(buildWithProfile({ flushIntoSupport: false })['flush_into_support']).toBe('0');
+  });
+
+  it('defaults all flush settings to false (0)', () => {
+    const c = buildWithProfile({});
+    expect(c['flush_into_objects']).toBe('0');
+    expect(c['flush_into_infill']).toBe('0');
+    expect(c['flush_into_support']).toBe('0');
+  });
+});
+
+// ================================================================
+// INTERLOCKING BEAM
+// ================================================================
+
+describe('Interlocking Beam', () => {
+  it('maps interlockingBeam to interlocking_beam', () => {
+    expect(buildWithProfile({ interlockingBeam: true })['interlocking_beam']).toBe('1');
+    expect(buildWithProfile({ interlockingBeam: false })['interlocking_beam']).toBe('0');
+  });
+
+  it('emits interlocking sub-fields when enabled', () => {
+    const c = buildWithProfile({
+      interlockingBeam: true,
+      interlockingBeamWidth: 1.2,
+      interlockingOrientation: 45,
+      interlockingBeamLayerCount: 3,
+      interlockingDepth: 4,
+    });
+    expect(c['interlocking_beam_width']).toBe('1.2');
+    expect(c['interlocking_orientation']).toBe('45');
+    expect(c['interlocking_beam_layer_count']).toBe('3');
+    expect(c['interlocking_depth']).toBe('4');
+  });
+
+  it('does not emit interlocking sub-fields when disabled', () => {
+    const c = buildWithProfile({ interlockingBeam: false });
+    expect(c['interlocking_beam_width']).toBeUndefined();
+    expect(c['interlocking_orientation']).toBeUndefined();
+    expect(c['interlocking_beam_layer_count']).toBeUndefined();
+    expect(c['interlocking_depth']).toBeUndefined();
+  });
+
+  it('rounds interlockingBeamLayerCount to integer', () => {
+    const c = buildWithProfile({ interlockingBeam: true, interlockingBeamLayerCount: 2.8 });
+    expect(c['interlocking_beam_layer_count']).toBe('3');
+  });
+
+  it('maps interlocking defaults when enabled', () => {
+    const c = buildWithProfile({ interlockingBeam: true });
+    expect(c['interlocking_beam_width']).toBe('0.8');
+    expect(c['interlocking_orientation']).toBe('22.5');
+    expect(c['interlocking_beam_layer_count']).toBe('2');
+    expect(c['interlocking_depth']).toBe('2');
+  });
+});
+
+// ================================================================
 // DEFAULT PROFILE PRODUCES VALID CONFIG
 // ================================================================
 
@@ -1832,5 +2089,376 @@ describe('Default profile config', () => {
   it('produces correct default exclude object (on)', () => {
     const c = buildWithProfile({});
     expect(c['exclude_object']).toBe('1');
+  });
+
+  it('produces correct default raft fields are not emitted (adhesion is skirt)', () => {
+    const c = buildWithProfile({});
+    // Raft fields only emitted when adhesionType === 'raft'
+    expect(c['raft_contact_distance']).toBeUndefined();
+    expect(c['raft_expansion']).toBeUndefined();
+    expect(c['raft_first_layer_density']).toBeUndefined();
+    expect(c['raft_first_layer_expansion']).toBeUndefined();
+  });
+
+  it('produces correct default brim_object_gap is not emitted (adhesion is skirt)', () => {
+    const c = buildWithProfile({});
+    // brim_object_gap only emitted when adhesionType === 'brim'
+    expect(c['brim_object_gap']).toBeUndefined();
+  });
+
+  it('produces correct defaults for new build-plate fields', () => {
+    const c = buildWithProfile({});
+    // Print sequence
+    expect(c['print_sequence']).toBe('by layer');
+    // Compensation
+    expect(c['elefant_foot_compensation']).toBe('0');
+    expect(c['elefant_foot_compensation_layers']).toBe('1');
+    expect(c['xy_hole_compensation']).toBe('0');
+    expect(c['xy_contour_compensation']).toBe('0');
+    // Slicing mode
+    expect(c['slicing_mode']).toBe('regular');
+    // Flush
+    expect(c['flush_into_objects']).toBe('0');
+    expect(c['flush_into_infill']).toBe('0');
+    expect(c['flush_into_support']).toBe('0');
+    // Support extras
+    expect(c['support_expansion']).toBe('0');
+    expect(c['support_critical_regions_only']).toBe('0');
+    expect(c['support_remove_small_overhang']).toBe('1');
+    expect(c['bridge_no_support']).toBe('0');
+    expect(c['max_bridge_length']).toBe('10');
+    // Tree support
+    expect(c['tree_support_branch_distance']).toBe('5');
+    expect(c['tree_support_tip_diameter']).toBe('0.8');
+    expect(c['tree_support_branch_diameter']).toBe('2');
+    expect(c['tree_support_branch_angle']).toBe('40');
+    expect(c['tree_support_wall_count']).toBe('0');
+    expect(c['tree_support_auto_brim']).toBe('1');
+    // Interlocking beam (disabled by default)
+    expect(c['interlocking_beam']).toBe('0');
+  });
+});
+
+// ================================================================
+// PER-OBJECT CONFIG DIFF — Phase 1 Fields
+// ================================================================
+// When a per-object override changes a Phase 1 field, the per-object
+// config should differ from the global config on exactly the expected
+// OrcaSlicer config key(s). This tests the key name and value format
+// when used in a per-object override context.
+
+describe('Per-object config diff — Phase 1 fields', () => {
+  /**
+   * Helper: compute config diff for a single overridden field.
+   * Builds global config with defaults, builds object config with override,
+   * returns only keys that differ.
+   */
+  function configDiff(
+    overrides: Partial<PrintProfile>,
+    baseOverrides: Partial<PrintProfile> = {},
+  ): Record<string, string> {
+    const base = { ...DEFAULT_PRINT_PROFILE, ...baseOverrides };
+    const global = buildOrcaConfig(base, DEFAULT_FILAMENT, DEFAULT_PRINTER, null, 1);
+    const merged = { ...base, ...overrides };
+    const object = buildOrcaConfig(merged, DEFAULT_FILAMENT, DEFAULT_PRINTER, null, 1);
+    const diff: Record<string, string> = {};
+    for (const [key, val] of Object.entries(object)) {
+      if (global[key] !== val) {
+        diff[key] = val;
+      }
+    }
+    return diff;
+  }
+
+  // Print sequence
+  it('printSequence override produces print_sequence diff', () => {
+    const diff = configDiff({ printSequence: 'by_object' });
+    expect(diff['print_sequence']).toBe('by object');
+  });
+
+  it('printSequence same as global produces no diff', () => {
+    const diff = configDiff({ printSequence: 'by_layer' });
+    expect(diff['print_sequence']).toBeUndefined();
+  });
+
+  // Elephant foot compensation
+  it('elephantFootCompensation override produces elefant_foot_compensation diff', () => {
+    const diff = configDiff({ elephantFootCompensation: 0.3 });
+    expect(diff['elefant_foot_compensation']).toBe('0.3');
+  });
+
+  it('elephantFootCompensationLayers override produces integer diff', () => {
+    const diff = configDiff({ elephantFootCompensationLayers: 5 });
+    expect(diff['elefant_foot_compensation_layers']).toBe('5');
+  });
+
+  // XY compensation
+  it('xyHoleCompensation override produces xy_hole_compensation diff', () => {
+    const diff = configDiff({ xyHoleCompensation: 0.15 });
+    expect(diff['xy_hole_compensation']).toBe('0.15');
+  });
+
+  it('xyContourCompensation negative override produces correct diff', () => {
+    const diff = configDiff({ xyContourCompensation: -0.2 });
+    expect(diff['xy_contour_compensation']).toBe('-0.2');
+  });
+
+  it('compensation overrides only affect compensation keys', () => {
+    const diff = configDiff({ elephantFootCompensation: 0.5, xyHoleCompensation: 0.1 });
+    expect(diff['elefant_foot_compensation']).toBe('0.5');
+    expect(diff['xy_hole_compensation']).toBe('0.1');
+    // Other keys should NOT be in the diff
+    expect(diff['layer_height']).toBeUndefined();
+    expect(diff['wall_loops']).toBeUndefined();
+    expect(diff['sparse_infill_density']).toBeUndefined();
+  });
+
+  // Slicing mode
+  it('slicingMode override produces slicing_mode diff', () => {
+    const diff = configDiff({ slicingMode: 'close_holes' });
+    expect(diff['slicing_mode']).toBe('close_holes');
+  });
+
+  it('slicingMode same as default produces no diff', () => {
+    const diff = configDiff({ slicingMode: 'regular' });
+    expect(diff['slicing_mode']).toBeUndefined();
+  });
+
+  // Flush into settings
+  it('flushIntoObjects override produces flush_into_objects diff', () => {
+    const diff = configDiff({ flushIntoObjects: true });
+    expect(diff['flush_into_objects']).toBe('1');
+  });
+
+  it('flushIntoInfill override produces flush_into_infill diff', () => {
+    const diff = configDiff({ flushIntoInfill: true });
+    expect(diff['flush_into_infill']).toBe('1');
+  });
+
+  it('flushIntoSupport override produces flush_into_support diff', () => {
+    const diff = configDiff({ flushIntoSupport: true });
+    expect(diff['flush_into_support']).toBe('1');
+  });
+
+  it('flush settings same as default produce no diff', () => {
+    const diff = configDiff({ flushIntoObjects: false, flushIntoInfill: false, flushIntoSupport: false });
+    expect(diff['flush_into_objects']).toBeUndefined();
+    expect(diff['flush_into_infill']).toBeUndefined();
+    expect(diff['flush_into_support']).toBeUndefined();
+  });
+
+  // Support expansion & related
+  it('supportExpansion override produces support_expansion diff', () => {
+    const diff = configDiff({ supportExpansion: 2.5 });
+    expect(diff['support_expansion']).toBe('2.5');
+  });
+
+  it('supportCriticalRegionsOnly override produces support_critical_regions_only diff', () => {
+    const diff = configDiff({ supportCriticalRegionsOnly: true });
+    expect(diff['support_critical_regions_only']).toBe('1');
+  });
+
+  it('supportRemoveSmallOverhang false override produces diff (default is true)', () => {
+    const diff = configDiff({ supportRemoveSmallOverhang: false });
+    expect(diff['support_remove_small_overhang']).toBe('0');
+  });
+
+  it('bridgeNoSupport override produces bridge_no_support diff', () => {
+    const diff = configDiff({ bridgeNoSupport: true });
+    expect(diff['bridge_no_support']).toBe('1');
+  });
+
+  it('maxBridgeLength override produces max_bridge_length diff', () => {
+    const diff = configDiff({ maxBridgeLength: 25 });
+    expect(diff['max_bridge_length']).toBe('25');
+  });
+
+  // Tree support
+  it('treeSupportBranchDistance override produces diff', () => {
+    const diff = configDiff({ treeSupportBranchDistance: 10 });
+    expect(diff['tree_support_branch_distance']).toBe('10');
+  });
+
+  it('treeSupportTipDiameter override produces diff', () => {
+    const diff = configDiff({ treeSupportTipDiameter: 0.6 });
+    expect(diff['tree_support_tip_diameter']).toBe('0.6');
+  });
+
+  it('treeSupportBranchDiameter override produces diff', () => {
+    const diff = configDiff({ treeSupportBranchDiameter: 4 });
+    expect(diff['tree_support_branch_diameter']).toBe('4');
+  });
+
+  it('treeSupportBranchAngle override produces integer diff', () => {
+    const diff = configDiff({ treeSupportBranchAngle: 55 });
+    expect(diff['tree_support_branch_angle']).toBe('55');
+  });
+
+  it('treeSupportWallCount override produces integer diff', () => {
+    const diff = configDiff({ treeSupportWallCount: 3 });
+    expect(diff['tree_support_wall_count']).toBe('3');
+  });
+
+  it('treeSupportAutoBrim false override produces diff (default is true)', () => {
+    const diff = configDiff({ treeSupportAutoBrim: false });
+    expect(diff['tree_support_auto_brim']).toBe('0');
+  });
+
+  it('multiple tree support overrides produce only tree support diffs', () => {
+    const diff = configDiff({
+      treeSupportBranchDistance: 8,
+      treeSupportTipDiameter: 1.0,
+      treeSupportBranchAngle: 30,
+    });
+    expect(diff['tree_support_branch_distance']).toBe('8');
+    expect(diff['tree_support_tip_diameter']).toBe('1');
+    expect(diff['tree_support_branch_angle']).toBe('30');
+    // Unrelated keys should not appear
+    expect(diff['wall_loops']).toBeUndefined();
+    expect(diff['layer_height']).toBeUndefined();
+  });
+
+  // Raft fields (only emitted when adhesionType is raft)
+  it('raft field overrides produce diffs when adhesion is raft', () => {
+    const base: Partial<PrintProfile> = { adhesionType: 'raft', raftLayers: 2 };
+    const diff = configDiff({
+      raftContactDistance: 0.25,
+      raftExpansion: 3,
+      raftFirstLayerDensity: 80,
+      raftFirstLayerExpansion: 4,
+    }, base);
+    expect(diff['raft_contact_distance']).toBe('0.25');
+    expect(diff['raft_expansion']).toBe('3');
+    expect(diff['raft_first_layer_density']).toBe('80%');
+    expect(diff['raft_first_layer_expansion']).toBe('4');
+  });
+
+  it('raft fields same as base produce no diff', () => {
+    const base: Partial<PrintProfile> = { adhesionType: 'raft', raftLayers: 2 };
+    const diff = configDiff({
+      raftContactDistance: 0.1,
+      raftExpansion: 1.5,
+      raftFirstLayerDensity: 90,
+      raftFirstLayerExpansion: 2,
+    }, base);
+    expect(diff['raft_contact_distance']).toBeUndefined();
+    expect(diff['raft_expansion']).toBeUndefined();
+    expect(diff['raft_first_layer_density']).toBeUndefined();
+    expect(diff['raft_first_layer_expansion']).toBeUndefined();
+  });
+
+  // Brim object gap (only emitted when adhesionType is brim)
+  it('brimObjectGap override produces diff when adhesion is brim', () => {
+    const base: Partial<PrintProfile> = { adhesionType: 'brim' };
+    const diff = configDiff({ brimObjectGap: 1.5 }, base);
+    expect(diff['brim_object_gap']).toBe('1.5');
+  });
+
+  it('brimObjectGap same as default produces no diff when adhesion is brim', () => {
+    const base: Partial<PrintProfile> = { adhesionType: 'brim' };
+    const diff = configDiff({ brimObjectGap: 0 }, base);
+    expect(diff['brim_object_gap']).toBeUndefined();
+  });
+
+  // Interlocking beam
+  it('interlockingBeam override from disabled to enabled produces sub-field diffs', () => {
+    const diff = configDiff({
+      interlockingBeam: true,
+      interlockingBeamWidth: 1.5,
+      interlockingOrientation: 45,
+      interlockingBeamLayerCount: 4,
+      interlockingDepth: 3,
+    });
+    expect(diff['interlocking_beam']).toBe('1');
+    expect(diff['interlocking_beam_width']).toBe('1.5');
+    expect(diff['interlocking_orientation']).toBe('45');
+    expect(diff['interlocking_beam_layer_count']).toBe('4');
+    expect(diff['interlocking_depth']).toBe('3');
+  });
+
+  it('interlockingBeam sub-fields differ against non-default base', () => {
+    const base: Partial<PrintProfile> = {
+      interlockingBeam: true,
+      interlockingBeamWidth: 0.8,
+      interlockingDepth: 2,
+    };
+    const diff = configDiff({
+      interlockingBeamWidth: 1.6,
+      interlockingDepth: 5,
+    }, base);
+    expect(diff['interlocking_beam_width']).toBe('1.6');
+    expect(diff['interlocking_depth']).toBe('5');
+    // interlockingBeam itself should NOT differ (same in both)
+    expect(diff['interlocking_beam']).toBeUndefined();
+  });
+
+  // Cross-category: override in one category doesn't pollute another
+  it('support override does not affect compensation or flush keys', () => {
+    const diff = configDiff({ supportExpansion: 5, supportCriticalRegionsOnly: true });
+    expect(diff['support_expansion']).toBe('5');
+    expect(diff['support_critical_regions_only']).toBe('1');
+    // Phase 1 keys from other categories should be absent
+    expect(diff['elefant_foot_compensation']).toBeUndefined();
+    expect(diff['xy_hole_compensation']).toBeUndefined();
+    expect(diff['slicing_mode']).toBeUndefined();
+    expect(diff['flush_into_objects']).toBeUndefined();
+    expect(diff['interlocking_beam']).toBeUndefined();
+  });
+
+  // All Phase 1 fields overridden simultaneously
+  it('all Phase 1 fields overridden produce correct diff keys', () => {
+    const diff = configDiff({
+      printSequence: 'by_object',
+      elephantFootCompensation: 0.5,
+      elephantFootCompensationLayers: 3,
+      xyHoleCompensation: 0.1,
+      xyContourCompensation: -0.05,
+      slicingMode: 'even_odd',
+      flushIntoObjects: true,
+      flushIntoInfill: true,
+      flushIntoSupport: true,
+      supportExpansion: 2,
+      supportCriticalRegionsOnly: true,
+      supportRemoveSmallOverhang: false,
+      bridgeNoSupport: true,
+      maxBridgeLength: 30,
+      treeSupportBranchDistance: 10,
+      treeSupportTipDiameter: 1.0,
+      treeSupportBranchDiameter: 4,
+      treeSupportBranchAngle: 50,
+      treeSupportWallCount: 2,
+      treeSupportAutoBrim: false,
+      interlockingBeam: true,
+      interlockingBeamWidth: 1.2,
+      interlockingOrientation: 30,
+      interlockingBeamLayerCount: 3,
+      interlockingDepth: 4,
+    });
+    // Verify all expected keys present
+    expect(diff['print_sequence']).toBe('by object');
+    expect(diff['elefant_foot_compensation']).toBe('0.5');
+    expect(diff['elefant_foot_compensation_layers']).toBe('3');
+    expect(diff['xy_hole_compensation']).toBe('0.1');
+    expect(diff['xy_contour_compensation']).toBe('-0.05');
+    expect(diff['slicing_mode']).toBe('even_odd');
+    expect(diff['flush_into_objects']).toBe('1');
+    expect(diff['flush_into_infill']).toBe('1');
+    expect(diff['flush_into_support']).toBe('1');
+    expect(diff['support_expansion']).toBe('2');
+    expect(diff['support_critical_regions_only']).toBe('1');
+    expect(diff['support_remove_small_overhang']).toBe('0');
+    expect(diff['bridge_no_support']).toBe('1');
+    expect(diff['max_bridge_length']).toBe('30');
+    expect(diff['tree_support_branch_distance']).toBe('10');
+    expect(diff['tree_support_tip_diameter']).toBe('1');
+    expect(diff['tree_support_branch_diameter']).toBe('4');
+    expect(diff['tree_support_branch_angle']).toBe('50');
+    expect(diff['tree_support_wall_count']).toBe('2');
+    expect(diff['tree_support_auto_brim']).toBe('0');
+    expect(diff['interlocking_beam']).toBe('1');
+    expect(diff['interlocking_beam_width']).toBe('1.2');
+    expect(diff['interlocking_orientation']).toBe('30');
+    expect(diff['interlocking_beam_layer_count']).toBe('3');
+    expect(diff['interlocking_depth']).toBe('4');
   });
 });

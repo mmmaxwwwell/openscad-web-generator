@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import type { PrintProfile } from '../../types/print-profile';
 import type { PrintSettingsTabProps } from './QualityTab';
+import { createOverrideHelpers } from './override-helpers';
 
 const INFILL_PATTERNS: Array<{ value: PrintProfile['sparseInfillPattern']; label: string }> = [
   { value: 'gyroid', label: 'Gyroid' },
@@ -33,19 +34,20 @@ const INFILL_PATTERNS: Array<{ value: PrintProfile['sparseInfillPattern']; label
   { value: 'octagramspiral', label: 'Octagram Spiral' },
 ];
 
-export function InfillTab({ profile, onChange }: PrintSettingsTabProps) {
+export function InfillTab({ profile, onChange, overrides, onResetField }: PrintSettingsTabProps) {
+  const { oc, resetBtn } = createOverrideHelpers(overrides, onResetField);
   const lineWidthIsAuto = profile.sparseInfillLineWidth === 0;
 
   return (
     <>
       <h4 className="print-dialog-subheading">Sparse Infill</h4>
-      <label className="print-dialog-field">
-        <span>Infill Density ({profile.sparseInfillDensity}%)</span>
+      <label className={`print-dialog-field${oc('sparseInfillDensity')}`}>
+        <span>Infill Density ({profile.sparseInfillDensity}%){resetBtn('sparseInfillDensity')}</span>
         <input type="range" value={profile.sparseInfillDensity} step={1} min={0} max={100}
           onChange={(e) => onChange({ sparseInfillDensity: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Infill Pattern</span>
+      <label className={`print-dialog-field${oc('sparseInfillPattern')}`}>
+        <span>Infill Pattern{resetBtn('sparseInfillPattern')}</span>
         <select value={profile.sparseInfillPattern}
           onChange={(e) => onChange({ sparseInfillPattern: e.target.value as PrintProfile['sparseInfillPattern'] })}>
           {INFILL_PATTERNS.map((p) => (
@@ -53,37 +55,39 @@ export function InfillTab({ profile, onChange }: PrintSettingsTabProps) {
           ))}
         </select>
       </label>
-      <label className="print-dialog-field">
-        <span>Infill Angle (&deg;)</span>
+      <label className={`print-dialog-field${oc('infillAngle')}`}>
+        <span>Infill Angle (&deg;){resetBtn('infillAngle')}</span>
         <input type="number" value={profile.infillAngle} min={0} max={180}
           onChange={(e) => onChange({ infillAngle: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Infill Overlap ({profile.infillOverlap}%)</span>
+      <label className={`print-dialog-field${oc('infillOverlap')}`}>
+        <span>Infill Overlap ({profile.infillOverlap}%){resetBtn('infillOverlap')}</span>
         <input type="range" value={profile.infillOverlap} step={1} min={0} max={80}
           onChange={(e) => onChange({ infillOverlap: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field print-dialog-field--checkbox">
+      <label className={`print-dialog-field print-dialog-field--checkbox${oc('infillCombination')}`}>
         <input type="checkbox" checked={profile.infillCombination}
           onChange={(e) => onChange({ infillCombination: e.target.checked })} />
-        <span>Infill Combination</span>
+        <span>Infill Combination{resetBtn('infillCombination')}</span>
       </label>
-      <label className="print-dialog-field">
-        <span>Sparse Infill Line Width {lineWidthIsAuto ? '(auto)' : `(${profile.sparseInfillLineWidth} mm)`}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input type="checkbox" checked={!lineWidthIsAuto}
-            onChange={(e) => onChange({ sparseInfillLineWidth: e.target.checked ? 0.4 : 0 })} />
-          {!lineWidthIsAuto && (
-            <input type="number" value={profile.sparseInfillLineWidth} min={0.1} max={2.0} step={0.01}
-              style={{ width: '5rem' }}
-              onChange={(e) => onChange({ sparseInfillLineWidth: Number(e.target.value) })} />
-          )}
-        </span>
+      <label className={`print-dialog-field${oc('sparseInfillLineWidth')}`}>
+        <span>Sparse Infill Line Width {lineWidthIsAuto ? '(auto)' : `(${profile.sparseInfillLineWidth} mm)`}{resetBtn('sparseInfillLineWidth')}</span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input type="number" value={lineWidthIsAuto ? 0.4 : profile.sparseInfillLineWidth}
+            disabled={lineWidthIsAuto} min={0.05} max={2.0} step={0.01}
+            style={{ flex: 1, opacity: lineWidthIsAuto ? 0.5 : 1 }}
+            onChange={(e) => onChange({ sparseInfillLineWidth: Number(e.target.value) })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={lineWidthIsAuto}
+              onChange={(e) => onChange({ sparseInfillLineWidth: e.target.checked ? 0 : 0.4 })} />
+            Auto
+          </label>
+        </div>
       </label>
 
       <h4 className="print-dialog-subheading">Surface Patterns</h4>
-      <label className="print-dialog-field">
-        <span>Top Surface Pattern</span>
+      <label className={`print-dialog-field${oc('topSurfacePattern')}`}>
+        <span>Top Surface Pattern{resetBtn('topSurfacePattern')}</span>
         <select value={profile.topSurfacePattern}
           onChange={(e) => onChange({ topSurfacePattern: e.target.value as PrintProfile['topSurfacePattern'] })}>
           {INFILL_PATTERNS.map((p) => (
@@ -91,8 +95,8 @@ export function InfillTab({ profile, onChange }: PrintSettingsTabProps) {
           ))}
         </select>
       </label>
-      <label className="print-dialog-field">
-        <span>Bottom Surface Pattern</span>
+      <label className={`print-dialog-field${oc('bottomSurfacePattern')}`}>
+        <span>Bottom Surface Pattern{resetBtn('bottomSurfacePattern')}</span>
         <select value={profile.bottomSurfacePattern}
           onChange={(e) => onChange({ bottomSurfacePattern: e.target.value as PrintProfile['bottomSurfacePattern'] })}>
           {INFILL_PATTERNS.map((p) => (
@@ -100,8 +104,8 @@ export function InfillTab({ profile, onChange }: PrintSettingsTabProps) {
           ))}
         </select>
       </label>
-      <label className="print-dialog-field">
-        <span>Internal Solid Infill Pattern</span>
+      <label className={`print-dialog-field${oc('internalSolidInfillPattern')}`}>
+        <span>Internal Solid Infill Pattern{resetBtn('internalSolidInfillPattern')}</span>
         <select value={profile.internalSolidInfillPattern}
           onChange={(e) => onChange({ internalSolidInfillPattern: e.target.value as PrintProfile['internalSolidInfillPattern'] })}>
           {INFILL_PATTERNS.map((p) => (
@@ -111,35 +115,53 @@ export function InfillTab({ profile, onChange }: PrintSettingsTabProps) {
       </label>
 
       <h4 className="print-dialog-subheading">Bridge</h4>
-      <label className="print-dialog-field">
-        <span>Bridge Flow Ratio</span>
+      <label className={`print-dialog-field${oc('bridgeFlow')}`}>
+        <span>Bridge Flow Ratio{resetBtn('bridgeFlow')}</span>
         <input type="number" value={profile.bridgeFlow} min={0.5} max={2.0} step={0.05}
           onChange={(e) => onChange({ bridgeFlow: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Internal Bridge Flow Ratio</span>
+      <label className={`print-dialog-field${oc('internalBridgeFlow')}`}>
+        <span>Internal Bridge Flow Ratio{resetBtn('internalBridgeFlow')}</span>
         <input type="number" value={profile.internalBridgeFlow} min={0.5} max={2.0} step={0.05}
           onChange={(e) => onChange({ internalBridgeFlow: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Bridge Density ({profile.bridgeDensity}%)</span>
+      <label className={`print-dialog-field${oc('bridgeDensity')}`}>
+        <span>Bridge Density ({profile.bridgeDensity}%){resetBtn('bridgeDensity')}</span>
         <input type="range" value={profile.bridgeDensity} step={1} min={10} max={100}
           onChange={(e) => onChange({ bridgeDensity: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Internal Bridge Density ({profile.internalBridgeDensity}%)</span>
+      <label className={`print-dialog-field${oc('internalBridgeDensity')}`}>
+        <span>Internal Bridge Density ({profile.internalBridgeDensity}%){resetBtn('internalBridgeDensity')}</span>
         <input type="range" value={profile.internalBridgeDensity} step={1} min={10} max={100}
           onChange={(e) => onChange({ internalBridgeDensity: Number(e.target.value) })} />
       </label>
-      <label className="print-dialog-field">
-        <span>Bridge Angle (&deg;, 0 = auto)</span>
-        <input type="number" value={profile.bridgeAngle} min={0} max={180}
-          onChange={(e) => onChange({ bridgeAngle: Number(e.target.value) })} />
+      <label className={`print-dialog-field${oc('bridgeAngle')}`}>
+        <span>Bridge Angle (&deg;){resetBtn('bridgeAngle')}</span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input type="number" value={profile.bridgeAngle} min={0} max={180}
+            disabled={profile.bridgeAngle === 0}
+            style={{ flex: 1, opacity: profile.bridgeAngle === 0 ? 0.5 : 1 }}
+            onChange={(e) => onChange({ bridgeAngle: Number(e.target.value) })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={profile.bridgeAngle === 0}
+              onChange={(e) => onChange({ bridgeAngle: e.target.checked ? 0 : 45 })} />
+            Auto
+          </label>
+        </div>
       </label>
-      <label className="print-dialog-field">
-        <span>Internal Bridge Angle (&deg;, 0 = auto)</span>
-        <input type="number" value={profile.internalBridgeAngle} min={0} max={180}
-          onChange={(e) => onChange({ internalBridgeAngle: Number(e.target.value) })} />
+      <label className={`print-dialog-field${oc('internalBridgeAngle')}`}>
+        <span>Internal Bridge Angle (&deg;){resetBtn('internalBridgeAngle')}</span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input type="number" value={profile.internalBridgeAngle} min={0} max={180}
+            disabled={profile.internalBridgeAngle === 0}
+            style={{ flex: 1, opacity: profile.internalBridgeAngle === 0 ? 0.5 : 1 }}
+            onChange={(e) => onChange({ internalBridgeAngle: Number(e.target.value) })} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={profile.internalBridgeAngle === 0}
+              onChange={(e) => onChange({ internalBridgeAngle: e.target.checked ? 0 : 45 })} />
+            Auto
+          </label>
+        </div>
       </label>
     </>
   );

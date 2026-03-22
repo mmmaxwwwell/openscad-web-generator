@@ -9,14 +9,11 @@ interface ExampleFile {
 
 const BUNDLED_EXAMPLES: ExampleFile[] = [
   { name: '1cm Cube', path: '/examples/cube_1cm.scad' },
+  { name: 'Parametric Cube', path: '/examples/param_cube.scad' },
+  { name: 'Parametric Multicolor', path: '/examples/param_multicolor.scad' },
   { name: 'Big Chapstick (BOSL2)', path: '/examples/big_chapstick.scad' },
-  { name: 'CSG Operations', path: '/examples/CSG.scad' },
-  { name: 'OpenSCAD Logo', path: '/examples/logo.scad' },
-  { name: 'Linear Extrude', path: '/examples/linear_extrude.scad' },
-  { name: 'Rotate Extrude', path: '/examples/rotate_extrude.scad' },
-  { name: 'Hull Sailboat', path: '/examples/hull_sailboat.scad' },
   { name: 'Parametric Sign', path: '/examples/sign.scad' },
-  { name: 'Candle Stand', path: '/examples/candleStand.scad' },
+  { name: 'Stacked Colors', path: '/examples/stacked_colors.scad' },
   { name: 'Fi Mini Case (BOSL2 + QR)', path: '/examples/fi_mini_case.scad' },
 ];
 
@@ -28,10 +25,7 @@ interface FileManagerProps {
   onFileUpload: (name: string, content: string) => Promise<void>;
   onFileDelete: (fileId: string) => Promise<void>;
   onExampleLoad: (name: string, content: string) => void;
-  onRefresh: () => Promise<void>;
   selectedFileId: string | null;
-  storageBackend: 'browser' | 's3';
-  onStorageBackendChange: (backend: 'browser' | 's3') => void;
 }
 
 export function FileManager({
@@ -42,10 +36,7 @@ export function FileManager({
   onFileUpload,
   onFileDelete,
   onExampleLoad,
-  onRefresh,
   selectedFileId,
-  storageBackend,
-  onStorageBackendChange,
 }: FileManagerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -96,16 +87,6 @@ export function FileManager({
       <div className="file-manager-header">
         <h2>Files</h2>
         <div className="file-manager-controls">
-          <select
-            value={storageBackend}
-            onChange={(e) => onStorageBackendChange(e.target.value as 'browser' | 's3')}
-          >
-            <option value="browser">Browser Storage</option>
-            <option value="s3">S3 Storage</option>
-          </select>
-          <button onClick={onRefresh} disabled={loading} title="Refresh file list">
-            Refresh
-          </button>
           <button onClick={handleUploadClick} disabled={uploading}>
             {uploading ? 'Uploading…' : 'Upload .scad'}
           </button>
