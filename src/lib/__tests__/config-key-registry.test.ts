@@ -231,6 +231,8 @@ const ORCASLICER_CONFIG_KEY_REGISTRY = new Set([
   'enable_prime_tower',
   'prime_tower_width',
   'prime_tower_brim_width',
+  'wipe_tower_x',
+  'wipe_tower_y',
   'flush_volumes_matrix',
   'flush_volumes_vector',
   'filament_colour',
@@ -451,7 +453,11 @@ function buildBrimConfig(): Record<string, string> {
  * Build multi-extruder config to get multi-material key.
  */
 function buildMultiExtruderConfig(): Record<string, string> {
-  return buildOrcaConfig(DEFAULT_PRINT_PROFILE, DEFAULT_FILAMENT, DEFAULT_PRINTER, null, 2);
+  const profile: PrintProfile = {
+    ...DEFAULT_PRINT_PROFILE,
+    enablePrimeTower: true,
+  };
+  return buildOrcaConfig(profile, DEFAULT_FILAMENT, DEFAULT_PRINTER, null, 2);
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
@@ -679,10 +685,11 @@ describe('Config Key Registry', () => {
   });
 
   describe('registry size tracking', () => {
-    it('registry contains the expected number of keys', () => {
-      // Update this count when adding new keys to the registry.
-      // This catches accidental additions/removals.
-      expect(ORCASLICER_CONFIG_KEY_REGISTRY.size).toBe(218);
+    it('registry contains all expected keys', () => {
+      // Snapshot of all registry keys — update when adding/removing keys.
+      // This catches accidental additions/removals by listing every key explicitly.
+      const registryKeys = [...ORCASLICER_CONFIG_KEY_REGISTRY].sort();
+      expect(registryKeys).toMatchSnapshot();
     });
   });
 });

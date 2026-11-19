@@ -18,18 +18,24 @@
 , ninja
 , python3
 , callPackage
+, memory64 ? false
 }:
 
 let
-  deps = callPackage ./orcaslicer-deps.nix {};
-  orcaslicerLib = callPackage ./orcaslicer-lib.nix {};
+  deps = callPackage ./orcaslicer-deps.nix { inherit memory64; };
+  orcaslicerLib = callPackage ./orcaslicer-lib.nix { inherit memory64; };
+
+  m64flag = lib.optionalString memory64 "-sMEMORY64=1";
+
+  # Output filenames differ for wasm64 variant
+  outputBasename = if memory64 then "libslic3r-wasm64" else "libslic3r";
 
   # Path to our WASM bindings source (slicer_bindings.cpp + CMakeLists.txt)
   bindingsSrc = ../src/wasm;
 
 in
 stdenv.mkDerivation {
-  pname = "orcaslicer-wasm";
+  pname = "orcaslicer-wasm${lib.optionalString memory64 "64"}";
   version = "2.3.1";
 
   src = bindingsSrc;
@@ -57,7 +63,7 @@ stdenv.mkDerivation {
 
     # Ensure exception handling and atomics flags reach every compile command
     # -matomics -mbulk-memory: needed for C++ atomics without full pthreads
-    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT"
+    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT ${m64flag}"
 
     # ============================================================
     # BUILD WASM BINDINGS
@@ -69,10 +75,12 @@ stdenv.mkDerivation {
       -G Ninja \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+      -DCMAKE_SIZEOF_VOID_P=${if memory64 then "8" else "4"} \
       -DCMAKE_CXX_COMPILER=em++ \
       -DCMAKE_C_COMPILER=emcc \
       -DLIBSLIC3R_PREFIX=${orcaslicerLib} \
-      -DDEPS_PREFIX=${deps}
+      -DDEPS_PREFIX=${deps} \
+      ${lib.optionalString memory64 "-DMEMORY64=ON"}
 
     cmake --build . --parallel
 
@@ -85,22 +93,22 @@ stdenv.mkDerivation {
     mkdir -p $out
 
     # Copy the WASM artifacts
-    cp libslic3r.js $out/
-    cp libslic3r.wasm $out/
+    cp ${outputBasename}.js $out/
+    cp ${outputBasename}.wasm $out/
 
     # Copy pthreads worker if generated (emscripten creates this for -pthread builds)
-    cp libslic3r.worker.js $out/ 2>/dev/null || true
+    cp ${outputBasename}.worker.js $out/ 2>/dev/null || true
 
     # Verify key outputs
-    test -f $out/libslic3r.js || (echo "ERROR: libslic3r.js missing" && exit 1)
-    test -f $out/libslic3r.wasm || (echo "ERROR: libslic3r.wasm missing" && exit 1)
+    test -f $out/${outputBasename}.js || (echo "ERROR: ${outputBasename}.js missing" && exit 1)
+    test -f $out/${outputBasename}.wasm || (echo "ERROR: ${outputBasename}.wasm missing" && exit 1)
 
     echo ""
     echo "========================================"
     echo "orcaslicer-wasm: Build successful"
     echo "========================================"
     echo "WASM artifacts:"
-    ls -lh $out/libslic3r.*
+    ls -lh $out/${outputBasename}.*
 
     runHook postInstall
   '';

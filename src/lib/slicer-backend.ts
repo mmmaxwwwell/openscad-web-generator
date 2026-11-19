@@ -37,6 +37,12 @@ export interface SlicerBackend {
     printSequence?: string,
     onProgress?: ProgressCallback,
   ): Promise<SliceResult>;
+  /**
+   * Query resolved config values from the slicer engine after slicing.
+   * Returns resolved values for "auto" fields (value=0) and other config keys.
+   * Must be called after a successful slice — returns empty object otherwise.
+   */
+  getResolvedConfigs(keys: string[]): Promise<Record<string, string>>;
   /** Cancel an in-flight slicing operation (best-effort). */
   cancel(): void;
   /** Release resources. The backend cannot be used after this. */
@@ -93,8 +99,11 @@ class WasmSlicerBackend implements SlicerBackend {
           this.pending = null;
           resolve({
             gcode: msg.gcode,
-            printTime: msg.stats?.printTime,
+            printTime: msg.nativeStats?.printTime ?? msg.stats?.printTime,
             filamentUsed: msg.stats?.filamentUsed,
+            stats: msg.nativeStats ?? undefined,
+            resolvedConfigs: msg.resolvedConfigs ?? undefined,
+            engineName: msg.engineName ?? undefined,
           });
         } else if (msg.type === 'error') {
           this.pending = null;
@@ -148,8 +157,11 @@ class WasmSlicerBackend implements SlicerBackend {
           this.pending = null;
           resolve({
             gcode: msg.gcode,
-            printTime: msg.stats?.printTime,
+            printTime: msg.nativeStats?.printTime ?? msg.stats?.printTime,
             filamentUsed: msg.stats?.filamentUsed,
+            stats: msg.nativeStats ?? undefined,
+            resolvedConfigs: msg.resolvedConfigs ?? undefined,
+            engineName: msg.engineName ?? undefined,
           });
         } else if (msg.type === 'error') {
           this.pending = null;
@@ -175,6 +187,32 @@ class WasmSlicerBackend implements SlicerBackend {
         { type: 'slicePlate', objects: clonedObjects, globalConfig, printSequence },
         transfers,
       );
+    });
+  }
+
+  getResolvedConfigs(keys: string[]): Promise<Record<string, string>> {
+    if (!this.worker) {
+      return Promise.resolve({});
+    }
+
+    const worker = this.worker;
+
+    return new Promise<Record<string, string>>((resolve) => {
+      const prevHandler = worker.onmessage;
+
+      worker.onmessage = (e: MessageEvent) => {
+        const msg = e.data;
+        if (msg.type === 'resolvedConfigs') {
+          // Restore previous handler and resolve
+          worker.onmessage = prevHandler;
+          resolve(msg.configs ?? {});
+        } else if (prevHandler) {
+          // Forward other messages (e.g. progress) to the normal handler
+          prevHandler.call(worker, e);
+        }
+      };
+
+      worker.postMessage({ type: 'getResolvedConfigs', keys });
     });
   }
 
@@ -231,6 +269,11 @@ class NativeSlicerBackend implements SlicerBackend {
     _onProgress?: ProgressCallback,
   ): Promise<SliceResult> {
     return Promise.reject(new Error('Multi-object plate slicing is not supported on the native Android backend'));
+  }
+
+  getResolvedConfigs(_keys: string[]): Promise<Record<string, string>> {
+    // Native backend doesn't support resolved config queries yet
+    return Promise.resolve({});
   }
 
   cancel(): void {

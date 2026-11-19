@@ -24,7 +24,7 @@ The dev shell provides: Node 22, JDK 17, Gradle, android-tools, ANDROID_HOME.
 nix develop -c npm install
 nix develop -c npm run build:wasm    # download OpenSCAD WASM from GitHub releases
 nix develop -c npm run dev           # start dev server at localhost:5173
-nix develop -c npm test              # run vitest (16 test files)
+nix develop -c npm test              # run vitest (30+ test files)
 ```
 
 ## Key Commands
@@ -45,11 +45,21 @@ All of these must be run inside `nix develop` or prefixed with `nix develop -c`.
 
 ## Slicer WASM (optional)
 
+Two variants are built: **wasm32** (standard, faster) and **wasm64** (Memory64, supports >4GB models).
+
 ```bash
-nix develop -c node scripts/download-slicer-wasm.mjs   # download from GitHub releases
-nix build .#orcaslicer-wasm                              # build from source (~50-85 min)
-nix develop -c node scripts/build-slicer-wasm.mjs       # copy Nix output to public/wasm/
+# Download pre-built from GitHub releases (both variants)
+nix develop -c node scripts/download-slicer-wasm.mjs
+
+# Build from source (~50-85 min per variant, can run in parallel)
+nix build .#orcaslicer-wasm                              # wasm32
+nix build .#orcaslicer-wasm64                            # wasm64 (Memory64)
+
+# Copy both variants' artifacts to public/wasm/
+nix develop -c node scripts/build-slicer-wasm.mjs --force
 ```
+
+The app loads wasm32 by default (faster due to bounds-check elimination) and automatically retries with wasm64 on OOM. wasm64 requires Chrome 133+ or Firefox 134+.
 
 New files must be `git add`-ed for Nix flakes to see them.
 
@@ -71,7 +81,7 @@ src/
 ├── workers/                # Web Workers (slicer, gcode-preview)
 ├── types/                  # TypeScript type definitions
 │   ├── index.ts            # ScadParam, ScadFile, StorageAdapter, etc.
-│   └── print-profile.ts    # PrintProfile, DEFAULT_PRINT_PROFILE
+│   └── print-profile.ts    # PrintProfile, DEFAULT_PRINT_PROFILE, SliceStats
 ├── data/                   # Static data
 │   └── printer-profiles.ts # Predefined printer models + filament defaults
 ├── wasm/                   # C++ WASM bindings (compiled by Nix)
@@ -102,7 +112,7 @@ No state library — all state lives in custom hooks backed by localStorage or I
 | Hook | Manages |
 |------|---------|
 | `useOpenSCAD` | OpenSCAD WASM worker lifecycle, `render()` / `renderMulticolor()` |
-| `useSlicer` | SlicerBackend (WASM or native), `slice()`, progress, cancellation, `engineName` |
+| `useSlicer` | SlicerBackend (WASM or native), `slice()`, progress, cancellation, `engineName`, `sliceStats`, `resolvedConfigs`, `queryResolvedConfigs()` |
 | `useScadParser` | Parses `.scad` source → `ScadFile` (params, presets, description) |
 | `useStorage` | `StorageAdapter` factory (IndexedDB or S3) |
 | `usePrinters` | Printer list CRUD (localStorage) |
@@ -117,8 +127,8 @@ No state library — all state lives in custom hooks backed by localStorage or I
 |--------|---------|
 | `openscad-api.ts` | Main-thread wrapper for OpenSCAD worker |
 | `openscad-worker.ts` | Worker: loads WASM + font/MCAD/BOSL2/QR modules, fresh instance per render |
-| `slicer-engine.ts` | Typed wrapper for libslic3r Emscripten module |
-| `orca-slicer-settings.ts` | `buildOrcaConfig()` — maps PrintProfile + filament + printer → OrcaSlicer config |
+| `slicer-engine.ts` | Typed wrapper for libslic3r Emscripten module, wasm32/wasm64 selection, `getSliceStats()`, `getResolvedConfigs()` |
+| `orca-slicer-settings.ts` | `buildOrcaConfig()` — maps PrintProfile + filament + printer → OrcaSlicer config; `getAutoValues()` — pre-slice auto field approximation |
 | `slicer-settings.ts` | Shared utilities: `convertKlipperGcode()`, `PrinterSettings`, `getModelHeightFromSTL()` |
 | `slicer-backend.ts` | Abstract `SlicerBackend` interface + WASM/native implementations + factory |
 | `native-slicer-backend.ts` | Android native slicer backend via WebView JS bridge |
@@ -136,7 +146,7 @@ No state library — all state lives in custom hooks backed by localStorage or I
 | Worker | What it does |
 |--------|-------------|
 | `openscad-worker.ts` (in lib/) | Runs OpenSCAD WASM — creates fresh instance per render (exit() kills runtime) |
-| `slicer-worker.ts` | Runs OrcaSlicer libslic3r WASM — loads model, applies config, slices, exports GCode |
+| `slicer-worker.ts` | Runs OrcaSlicer libslic3r WASM — loads model, applies config, slices, exports GCode. OOM auto-retry with wasm64. |
 | `gcode-preview-worker.ts` | Parses GCode off main thread (CPU-intensive) |
 
 ### WASM Modules
@@ -145,7 +155,7 @@ Two WASM modules, both loaded in Web Workers:
 
 1. **OpenSCAD WASM** — renders `.scad` → STL/3MF. Downloaded from `openscad/openscad-wasm` GitHub releases. Companion data files: fonts, MCAD, BOSL2, QR. Lives in `public/wasm/`.
 
-2. **libslic3r WASM** — slices STL/3MF → GCode. Built from OrcaSlicer v2.3.1 via Nix (3-stage: deps → lib → WASM bindings with embind). C++ bindings in `src/wasm/slicer_bindings.cpp`. Requires COOP/COEP headers for SharedArrayBuffer (pthreads). **Note:** Multi-color 3MF objects are merged into a single object with multiple volumes (one per color/extruder) during loading — OrcaSlicer requires all volumes in one object for correct multi-material slicing and first-layer validation. `ensure_on_bed()` is only called per-object for STL; for 3MF, a uniform Z translation preserves stacked assembly positions. On Android, a native ARM64/ARM32 backend (`libslic3r.so`) can be used instead of WASM via the `SlicerBackend` abstraction.
+2. **libslic3r WASM** — slices STL/3MF → GCode. Built from OrcaSlicer v2.3.1 via Nix (3-stage: deps → lib → WASM bindings with embind). Two variants: **wasm32** (standard, 4GB max) and **wasm64** (Memory64, 8GB max, Chrome 133+/Firefox 134+). C++ bindings in `src/wasm/slicer_bindings.cpp`. **C++ API:** `slice()`, `getSliceStats()` (rich print statistics as JSON), `getResolvedConfig(key)` / `getResolvedConfigs(keys)` (resolved config values after slicing). **Note:** Multi-color 3MF objects are merged into a single object with multiple volumes (one per color/extruder) during loading — OrcaSlicer requires all volumes in one object for correct multi-material slicing and first-layer validation. `ensure_on_bed()` is only called per-object for STL; for 3MF, a uniform Z translation preserves stacked assembly positions. On Android, a native ARM64/ARM32 backend (`libslic3r.so`) can be used instead of WASM via the `SlicerBackend` abstraction.
 
 ### Nix Build Derivations (`nix/`)
 
@@ -154,10 +164,12 @@ Two WASM modules, both loaded in Web Workers:
 | `openscad-wasm.nix` | OpenSCAD WASM from source (~90 min) |
 | `orcaslicer-deps.nix` | 16+ C++ dependencies (Boost, TBB, GMP, CGAL, Clipper2, draco, mcut, libnoise, etc.) via Emscripten |
 | `orcaslicer-lib.nix` | OrcaSlicer v2.3.1 libslic3r source → static libraries |
-| `orcaslicer-wasm.nix` | Links bindings + libs → `libslic3r.{js,wasm,worker.js}` |
+| `orcaslicer-wasm.nix` | Links bindings + libs → `libslic3r.{js,wasm}`. Parameterized: `memory64 = true` produces wasm64 variant. |
 | `orcaslicer-android.nix` | Cross-compiles libslic3r for Android ARM64/ARM32 via NDK → `libslic3r.so` |
 
-`flake.nix` exposes: `devShell`, `openscad-wasm`, `orcaslicer-deps`, `orcaslicer-lib`, `orcaslicer-wasm`, `orcaslicer-android-arm64`, `orcaslicer-android-arm32`, `default` (npm production build via `buildNpmPackage`).
+All three orcaslicer Nix files accept a `memory64` parameter. When `true`, the entire chain rebuilds with `-sMEMORY64=1` (wasm32 and wasm64 `.a` files are not ABI-compatible).
+
+`flake.nix` exposes: `devShell`, `openscad-wasm`, `orcaslicer-deps`, `orcaslicer-lib`, `orcaslicer-wasm`, `orcaslicer-deps-wasm64`, `orcaslicer-lib-wasm64`, `orcaslicer-wasm64`, `orcaslicer-android-arm64`, `orcaslicer-android-arm32`, `default` (npm production build via `buildNpmPackage`).
 
 ### Build Scripts (`scripts/`)
 
@@ -166,8 +178,8 @@ Two WASM modules, both loaded in Web Workers:
 | `build.mjs` | Orchestrates full production build (download WASM, bundle libs, vite build) |
 | `build-wasm.mjs` | Builds OpenSCAD WASM via `nix build .#openscad-wasm` |
 | `download-wasm.mjs` | Downloads pre-built OpenSCAD WASM from GitHub releases |
-| `build-slicer-wasm.mjs` | Copies Nix-built slicer WASM to `public/wasm/` |
-| `download-slicer-wasm.mjs` | Downloads pre-built slicer WASM from GitHub releases |
+| `build-slicer-wasm.mjs` | Builds + copies both wasm32 and wasm64 slicer WASM to `public/wasm/` (`--no-wasm64` to skip) |
+| `download-slicer-wasm.mjs` | Downloads both wasm32 and wasm64 slicer WASM from GitHub releases (`--no-wasm64` to skip) |
 | `bundle-bosl2.mjs` | Bundles BOSL2 library into Emscripten data file |
 | `bundle-qr.mjs` | Bundles scadqr library into Emscripten data file |
 | `copy-android-slicer.sh` | Copies Nix-built Android .so + headers into APK project |
@@ -187,7 +199,7 @@ Two WASM modules, both loaded in Web Workers:
 ## Testing
 
 - Tests in `src/lib/__tests__/` and `src/components/__tests__/`, run with `nix develop -c npm test`
-- ~1240 tests across 30 test files
+- ~2370 tests across 30+ test files
 - Vitest with 10s timeout
 - Mock workers via `vi.stubGlobal`, suppress console via `vi.spyOn`
 - Coverage includes `src/lib`, `src/data`, `src/types`

@@ -25,6 +25,8 @@ export interface BuildPlateCanvasProps {
   onUpdateTransform: (id: string, transform: { position?: { x: number; y: number }; rotation?: number; scale?: { x: number; y: number; z: number } }) => void;
   /** Callback when the prime tower is dragged to a new position */
   onUpdatePrimeTowerPosition?: (position: { x: number; y: number }) => void;
+  /** Callback when an object is right-clicked (context menu) */
+  onObjectContextMenu?: (objectId: string, screenX: number, screenY: number) => void;
   /** Enable grid snapping for position (1mm) and rotation (15°) */
   gridSnap?: boolean;
 }
@@ -384,6 +386,7 @@ export function BuildPlateCanvas({
   onSelectObject,
   onUpdateTransform,
   onUpdatePrimeTowerPosition,
+  onObjectContextMenu,
   gridSnap = false,
 }: BuildPlateCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -430,6 +433,8 @@ export function BuildPlateCanvas({
   onUpdateTransformRef.current = onUpdateTransform;
   const onUpdatePrimeTowerPositionRef = useRef(onUpdatePrimeTowerPosition);
   onUpdatePrimeTowerPositionRef.current = onUpdatePrimeTowerPosition;
+  const onObjectContextMenuRef = useRef(onObjectContextMenu);
+  onObjectContextMenuRef.current = onObjectContextMenu;
   const objectsRef = useRef(objects);
   objectsRef.current = objects;
   const originCenterRef = useRef(originCenter);
@@ -1100,6 +1105,21 @@ export function BuildPlateCanvas({
     if (containerRef.current) containerRef.current.style.cursor = '';
   }, []);
 
+  const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    if (!renderer || !camera || !onObjectContextMenuRef.current) return;
+
+    const ndc = clientToNDC(event.clientX, event.clientY);
+    const hitObjectId = hitTestObjects(ndc);
+
+    if (hitObjectId) {
+      event.preventDefault();
+      onSelectObjectRef.current(hitObjectId);
+      onObjectContextMenuRef.current(hitObjectId, event.clientX, event.clientY);
+    }
+  }, [clientToNDC, hitTestObjects]);
+
   // Compute selected object info for numeric overlay
   const selectedObject = selectedObjectId ? objects.find((o) => o.id === selectedObjectId) : null;
 
@@ -1114,6 +1134,7 @@ export function BuildPlateCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
+        onContextMenu={handleContextMenu}
         style={{ width: '100%', height: '100%', touchAction: 'none' }}
       />
       {selectedObject && (

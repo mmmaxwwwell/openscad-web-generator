@@ -68,6 +68,37 @@ export type PrintSequence = 'by_layer' | 'by_object';
 export type SlicingMode = 'regular' | 'even_odd' | 'close_holes';
 
 // ============================================================
+// SliceStats — rich print statistics from the slicer engine
+// ============================================================
+
+export interface SliceStats {
+  /** Estimated print time in seconds */
+  printTime: number;
+  /** Pre-formatted print time string from libslic3r (e.g. "1h 23m 45s") */
+  printTimeStr: string;
+  /** Total filament used in grams (all extruders combined) */
+  totalFilamentG: number;
+  /** Total extruded volume in cubic millimeters */
+  totalFilamentMm3: number;
+  /** Total filament weight in grams */
+  totalWeight: number;
+  /** Total estimated cost (currency units from filament cost setting) */
+  totalCost: number;
+  /** Number of tool changes during the print */
+  totalToolchanges: number;
+  /** Initial extruder index (0-based) */
+  initialTool: number;
+  /** Filament used by the wipe tower in grams */
+  wipeTowerFilament: number;
+  /** Per-extruder filament usage: extruder index (0-based) → grams */
+  perExtruderFilament: Record<number, number>;
+  /** Total layer count (max across all objects) */
+  layerCount: number;
+  /** Support layer count (max across all objects) */
+  supportLayerCount: number;
+}
+
+// ============================================================
 // PrintProfile
 // ============================================================
 

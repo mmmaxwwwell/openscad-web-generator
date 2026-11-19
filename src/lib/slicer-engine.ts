@@ -18,6 +18,8 @@
  * the WASM module will fail to initialize its thread pool.
  */
 
+import type { SliceStats } from '../types/print-profile';
+
 // ---------------------------------------------------------------------------
 // Emscripten module types
 // ---------------------------------------------------------------------------
@@ -29,11 +31,16 @@ interface WasmSlicerInstance {
   setConfigString(key: string, value: string): void;
   slice(): void;
   exportGCode(): string;
+  // Resolved config + stats API (added in Phase 1)
+  getSliceStats(): string;
+  getResolvedConfig(key: string): string;
+  getResolvedConfigs(keys: unknown): string;
   // Multi-object Build Plate API
   clearModel(): void;
   addSTLObject(path: string, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
   add3MFObject(path: string, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
   setObjectConfig(objectIndex: number, key: string, value: string): void;
+  setVolumeExtruder(objectIndex: number, volumeIndex: number, extruder: number): void;
   setPrintSequence(mode: string): void;
   getObjectCount(): number;
   /** embind destructor — must be called to free C++ memory */
@@ -66,6 +73,8 @@ type CreateSlicerModule = (opts?: Record<string, unknown>) => Promise<SlicerModu
 // ---------------------------------------------------------------------------
 
 export interface SlicerEngine {
+  /** Which WASM variant is loaded: 'wasm32' or 'wasm64' */
+  readonly variant: 'wasm32' | 'wasm64';
   /** Load an STL model from binary data */
   loadSTL(buffer: ArrayBuffer | Uint8Array): void;
   /** Load a 3MF model from binary data (multi-color extruder assignments preserved) */
@@ -79,6 +88,20 @@ export interface SlicerEngine {
   /** Release all C++ resources. The engine cannot be used after this. */
   destroy(): void;
 
+  // --- Resolved Config + Stats API ---
+
+  /**
+   * Get print statistics after slicing. Must call slice() first.
+   * Returns null if stats are unavailable (e.g., older WASM build without the method).
+   */
+  getSliceStats(): SliceStats | null;
+  /**
+   * Query multiple resolved config values by OrcaSlicer key name.
+   * Must call slice() first — config is resolved during apply().
+   * Returns empty object if unavailable (e.g., older WASM build).
+   */
+  getResolvedConfigs(keys: string[]): Record<string, string>;
+
   // --- Multi-object Build Plate API ---
 
   /** Clear the model, removing all objects. Resets state for a fresh plate. */
@@ -89,6 +112,8 @@ export interface SlicerEngine {
   add3MFObject(buffer: ArrayBuffer | Uint8Array, posX: number, posY: number, rotZ: number, scaleX: number, scaleY: number, scaleZ: number): number;
   /** Set per-object config overrides. Only keys that differ from global config need to be set. */
   setObjectConfig(objectIndex: number, entries: Record<string, string>): void;
+  /** Set the extruder for a specific volume within an object. extruder is 1-based (OrcaSlicer convention). */
+  setVolumeExtruder(objectIndex: number, volumeIndex: number, extruder: number): void;
   /** Set print sequence mode: 'by layer' or 'by object'. */
   setPrintSequence(mode: string): void;
   /** Return the number of objects currently on the plate. */
@@ -118,10 +143,37 @@ export function checkCrossOriginIsolation(): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Memory64 detection
+// ---------------------------------------------------------------------------
+
+let memory64Cached: boolean | null = null;
+
+/**
+ * Check whether the browser supports WebAssembly Memory64 (i64 index).
+ * Memory64 allows WASM to address >4GB of memory, but has a 10-100%
+ * performance penalty (no bounds-check elimination via virtual memory).
+ * wasm64 should only be used as a fallback when wasm32 OOMs.
+ *
+ * Supported: Chrome 133+, Firefox 134+. Safari: not yet (as of 2025-05).
+ */
+export function supportsMemory64(): boolean {
+  if (memory64Cached !== null) return memory64Cached;
+  try {
+    new WebAssembly.Memory({ initial: 1, index: 'i64' } as WebAssembly.MemoryDescriptor);
+    memory64Cached = true;
+  } catch {
+    memory64Cached = false;
+  }
+  return memory64Cached;
+}
+
+// ---------------------------------------------------------------------------
 // Module loading
 // ---------------------------------------------------------------------------
 
-let cachedModulePromise: Promise<SlicerModule> | null = null;
+/** Separate caches for wasm32 and wasm64 modules */
+let cachedModulePromise32: Promise<SlicerModule> | null = null;
+let cachedModulePromise64: Promise<SlicerModule> | null = null;
 
 
 /**
@@ -141,13 +193,21 @@ function resolveWasmBaseUrl(): string {
  * Load the Emscripten module. Caches the result so subsequent calls
  * return the same module instance (the module is reusable — unlike OpenSCAD,
  * libslic3r doesn't call exit()).
+ *
+ * @param wasm64 - If true, loads the wasm64 variant (libslic3r-wasm64.{js,wasm}).
+ *                 Defaults to false (wasm32). The wasm64 variant supports >4GB
+ *                 memory but has a 10-100% performance penalty.
  */
-async function loadSlicerModule(): Promise<SlicerModule> {
-  if (cachedModulePromise) return cachedModulePromise;
+async function loadSlicerModule(wasm64 = false): Promise<SlicerModule> {
+  const cached = wasm64 ? cachedModulePromise64 : cachedModulePromise32;
+  if (cached) return cached;
 
-  cachedModulePromise = (async () => {
+  const basename = wasm64 ? 'libslic3r-wasm64' : 'libslic3r';
+  const variant = wasm64 ? 'wasm64' : 'wasm32';
+
+  const promise = (async () => {
     const base = resolveWasmBaseUrl();
-    const jsUrl = `${base}/wasm/libslic3r.js`;
+    const jsUrl = `${base}/wasm/${basename}.js`;
 
     // Verify COOP/COEP for pthreads support
     const isolated = checkCrossOriginIsolation();
@@ -166,9 +226,10 @@ async function loadSlicerModule(): Promise<SlicerModule> {
     const resp = await fetch(jsUrl);
     if (!resp.ok) {
       throw new Error(
-        `Failed to fetch slicer WASM module from ${jsUrl} (HTTP ${resp.status}). ` +
-        'The libslic3r WASM files may not be built yet. ' +
-        'Run: node scripts/build-slicer-wasm.mjs'
+        `Failed to fetch slicer WASM module (${variant}) from ${jsUrl} (HTTP ${resp.status}). ` +
+        (wasm64
+          ? 'The wasm64 slicer files may not be built yet. Build with: nix build .#orcaslicer-wasm64'
+          : 'The libslic3r WASM files may not be built yet. Run: node scripts/build-slicer-wasm.mjs')
       );
     }
     const scriptText = await resp.text();
@@ -190,24 +251,25 @@ async function loadSlicerModule(): Promise<SlicerModule> {
 
     if (typeof createModule !== 'function') {
       throw new Error(
-        `Failed to load slicer WASM module from ${jsUrl}. ` +
-        'The libslic3r WASM files may not be built yet. ' +
-        'Run: node scripts/build-slicer-wasm.mjs'
+        `Failed to load slicer WASM module (${variant}) from ${jsUrl}. ` +
+        (wasm64
+          ? 'The wasm64 slicer files may not be built yet. Build with: nix build .#orcaslicer-wasm64'
+          : 'The libslic3r WASM files may not be built yet. Run: node scripts/build-slicer-wasm.mjs')
       );
     }
 
     // Initialize the WASM module
-    console.log('[slicer-engine] Creating WASM module...', { jsUrl, base, isolated });
+    console.log(`[slicer-engine] Creating ${variant} WASM module...`, { jsUrl, base, isolated });
 
     const module = await createModule({
       // Let Emscripten locate the .wasm file relative to the JS glue
       locateFile: (path: string) => {
         console.log('[slicer-engine] locateFile:', path);
-        if (path.endsWith('.wasm')) return `${base}/wasm/libslic3r.wasm`;
-        if (path.endsWith('.worker.js')) return `${base}/wasm/libslic3r.worker.js`;
+        if (path.endsWith('.wasm')) return `${base}/wasm/${basename}.wasm`;
+        if (path.endsWith('.worker.js')) return `${base}/wasm/${basename}.worker.js`;
         return path;
       },
-      // Point pthreads at the real libslic3r.js URL, not the ESM blob wrapper.
+      // Point pthreads at the real JS URL, not the ESM blob wrapper.
       // Emscripten pthreads spawn classic (non-module) workers that load
       // this script — without this, they'd try to load the revoked blob URL
       // which contains an `export default` statement that fails in classic mode.
@@ -215,7 +277,7 @@ async function loadSlicerModule(): Promise<SlicerModule> {
       print: (text: string) => console.log('[slicer-wasm]', text),
       printErr: (text: string) => console.warn('[slicer-wasm]', text),
     });
-    console.log('[slicer-engine] WASM module created successfully');
+    console.log(`[slicer-engine] ${variant} WASM module created successfully`);
 
     // Ensure /tmp exists for the temp file helpers in slicer_bindings.cpp
     try { module.FS.mkdir('/tmp'); } catch { /* already exists */ }
@@ -223,10 +285,37 @@ async function loadSlicerModule(): Promise<SlicerModule> {
     return module;
   })();
 
-  // If loading fails, clear the cache so a retry is possible
-  cachedModulePromise.catch(() => { cachedModulePromise = null; });
+  // Store in the appropriate cache
+  if (wasm64) {
+    cachedModulePromise64 = promise;
+    promise.catch(() => { cachedModulePromise64 = null; });
+  } else {
+    cachedModulePromise32 = promise;
+    promise.catch(() => { cachedModulePromise32 = null; });
+  }
 
-  return cachedModulePromise;
+  return promise;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse libslic3r's print time string (e.g. "1d 2h 34m 56s") into seconds.
+ * Returns 0 if the string can't be parsed.
+ */
+export function parsePrintTimeStr(s: string): number {
+  let total = 0;
+  const dayMatch = s.match(/(\d+)d/);
+  const hourMatch = s.match(/(\d+)h/);
+  const minMatch = s.match(/(\d+)m/);
+  const secMatch = s.match(/(\d+)s/);
+  if (dayMatch) total += parseInt(dayMatch[1], 10) * 86400;
+  if (hourMatch) total += parseInt(hourMatch[1], 10) * 3600;
+  if (minMatch) total += parseInt(minMatch[1], 10) * 60;
+  if (secMatch) total += parseInt(secMatch[1], 10);
+  return total;
 }
 
 // ---------------------------------------------------------------------------
@@ -261,10 +350,14 @@ function writeToVFS(
  * WasmSlicer C++ object. Each engine instance is independent and can
  * be used for one slice operation at a time.
  *
+ * @param wasm64 - If true, loads the wasm64 variant (>4GB memory support,
+ *                 10-100% slower). Defaults to false (wasm32).
+ *
  * Must be called from a Web Worker context.
  */
-export async function createSlicerEngine(): Promise<SlicerEngine> {
-  const module = await loadSlicerModule();
+export async function createSlicerEngine(wasm64 = false): Promise<SlicerEngine> {
+  const module = await loadSlicerModule(wasm64);
+  const variant: 'wasm32' | 'wasm64' = wasm64 ? 'wasm64' : 'wasm32';
   let slicer: WasmSlicerInstance | null = new module.WasmSlicer();
   let destroyed = false;
 
@@ -309,6 +402,8 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
   }
 
   return {
+    variant,
+
     loadSTL(buffer: ArrayBuffer | Uint8Array): void {
       const path = writeToVFS(module.FS, buffer, '.stl');
       try {
@@ -374,6 +469,11 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
       // postMessage enqueues messages to the main thread even while blocked.
       const origLog = console.log;
       const origWarn = console.warn;
+      const origError = console.error;
+      // Capture C++ EM_ASM console.error messages — these fire synchronously
+      // before the exception reaches JS, and contain the actual error text
+      // (e.g. "slice() failed: std::bad_alloc") that we need for OOM detection
+      let lastErrorMsg = '';
       if (onProgress) {
         console.log = (...args: unknown[]) => {
           origLog.apply(console, args);
@@ -389,15 +489,29 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
           if (cleaned) onProgress('slicing', 0.5, cleaned);
         };
       }
+      console.error = (...args: unknown[]) => {
+        origError.apply(console, args);
+        const text = args.map(String).join(' ');
+        if (text.includes('[slicer-wasm]')) {
+          lastErrorMsg = text;
+        }
+      };
 
       try {
         getSlicer().slice();
       } catch (e: unknown) {
-        console.error('[slicer-engine] slice() exception:', typeof e, e);
-        throw decodeWasmException(e, 'slice');
+        origError('[slicer-engine] slice() exception:', typeof e, e);
+        // If we can't decode the WASM exception but captured the C++ error message,
+        // use that instead — it contains the actual exception text (e.g. "bad_alloc")
+        const decoded = decodeWasmException(e, 'slice');
+        if (lastErrorMsg && decoded.message.includes('WASM exception (ptr=')) {
+          throw new Error(`slice(): ${lastErrorMsg.replace(/^\[slicer-wasm\]\s*/, '')}`);
+        }
+        throw decoded;
       } finally {
         console.log = origLog;
         console.warn = origWarn;
+        console.error = origError;
       }
       onProgress?.('slicing', 1);
     },
@@ -416,6 +530,52 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
       if (slicer) {
         slicer.delete();
         slicer = null;
+      }
+    },
+
+    // --- Resolved Config + Stats API ---
+
+    getSliceStats(): SliceStats | null {
+      try {
+        const s = getSlicer();
+        if (typeof s.getSliceStats !== 'function') {
+          console.warn('[slicer-engine] getSliceStats() not available on this WASM build');
+          return null;
+        }
+        const json = s.getSliceStats();
+        const raw = JSON.parse(json);
+        return {
+          printTime: parsePrintTimeStr(raw.estimated_normal_print_time ?? ''),
+          printTimeStr: raw.estimated_normal_print_time ?? '',
+          totalFilamentG: raw.total_used_filament ?? 0,
+          totalFilamentMm3: raw.total_extruded_volume ?? 0,
+          totalWeight: raw.total_weight ?? 0,
+          totalCost: raw.total_cost ?? 0,
+          totalToolchanges: raw.total_toolchanges ?? 0,
+          initialTool: raw.initial_tool ?? 0,
+          wipeTowerFilament: raw.total_wipe_tower_filament ?? 0,
+          perExtruderFilament: raw.filament_stats ?? {},
+          layerCount: raw.layer_count ?? 0,
+          supportLayerCount: raw.support_layer_count ?? 0,
+        };
+      } catch (e: unknown) {
+        console.warn('[slicer-engine] getSliceStats() failed:', e);
+        return null;
+      }
+    },
+
+    getResolvedConfigs(keys: string[]): Record<string, string> {
+      try {
+        const s = getSlicer();
+        if (typeof s.getResolvedConfigs !== 'function') {
+          console.warn('[slicer-engine] getResolvedConfigs() not available on this WASM build');
+          return {};
+        }
+        const json = s.getResolvedConfigs(keys);
+        return JSON.parse(json);
+      } catch (e: unknown) {
+        console.warn('[slicer-engine] getResolvedConfigs() failed:', e);
+        return {};
       }
     },
 
@@ -468,6 +628,14 @@ export async function createSlicerEngine(): Promise<SlicerEngine> {
             throw decoded;
           }
         }
+      }
+    },
+
+    setVolumeExtruder(objectIndex: number, volumeIndex: number, extruder: number): void {
+      try {
+        getSlicer().setVolumeExtruder(objectIndex, volumeIndex, extruder);
+      } catch (e: unknown) {
+        throw decodeWasmException(e, `setVolumeExtruder(${objectIndex}, ${volumeIndex}, ${extruder})`);
       }
     },
 

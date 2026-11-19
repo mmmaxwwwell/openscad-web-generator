@@ -248,6 +248,22 @@ if(LIB_LIBNOISE)
 endif()
 
 # ============================================================
+# Memory64 (wasm64) support
+# ============================================================
+option(MEMORY64 "Build with 64-bit memory (wasm64)" OFF)
+
+if(MEMORY64)
+    set(MEMORY64_LINK_FLAGS "-sMEMORY64=1")
+    set(MAX_MEMORY "17179869184")  # 16GB for wasm64 (practical browser limit)
+    set(OUTPUT_BASENAME "libslic3r-wasm64")
+    target_compile_options(libslic3r PRIVATE -sMEMORY64=1)
+else()
+    set(MEMORY64_LINK_FLAGS "")
+    set(MAX_MEMORY "4294967296")  # 4GB for wasm32
+    set(OUTPUT_BASENAME "libslic3r")
+endif()
+
+# ============================================================
 # Emscripten link flags
 # ============================================================
 set_target_properties(libslic3r PROPERTIES
@@ -255,10 +271,11 @@ set_target_properties(libslic3r PROPERTIES
     LINK_FLAGS "\
         -lembind \
         -fexceptions \
+        ${MEMORY64_LINK_FLAGS} \
         -sMODULARIZE=1 \
         -sEXPORT_NAME=createSlicerModule \
         -sENVIRONMENT=worker \
-        -sMAXIMUM_MEMORY=4294967296 \
+        -sMAXIMUM_MEMORY=${MAX_MEMORY} \
         -sINITIAL_MEMORY=268435456 \
         -sALLOW_MEMORY_GROWTH=1 \
         -sSTACK_SIZE=8388608 \
@@ -268,5 +285,5 @@ set_target_properties(libslic3r PROPERTIES
     "
 )
 
-# Output name: libslic3r.js + libslic3r.wasm (+ libslic3r.worker.js for pthreads)
-set_target_properties(libslic3r PROPERTIES OUTPUT_NAME "libslic3r")
+# Output name: libslic3r.js/.wasm or libslic3r-wasm64.js/.wasm
+set_target_properties(libslic3r PROPERTIES OUTPUT_NAME "${OUTPUT_BASENAME}")

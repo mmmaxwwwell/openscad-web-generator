@@ -7,6 +7,7 @@ import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeome
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import type { ParsedGCode, MoveType } from '../lib/gcode-parser';
 import { MOVE_TYPE_COLORS } from '../lib/gcode-parser';
+import type { SliceStats } from '../types/print-profile';
 
 type ColorMode = 'line-type' | 'filament';
 
@@ -24,6 +25,8 @@ interface GCodePreviewProps {
   nozzleDiameter?: number;
   /** Per-extruder colors for filament color mode. Index = extruder number. Defaults to ['#dddddd']. */
   extruderColors?: string[];
+  /** Slice statistics to display as an overlay. */
+  sliceStats?: SliceStats | null;
   /** Called when user clicks back */
   onBack?: () => void;
 }
@@ -253,6 +256,7 @@ export function GCodePreview({
   originCenter = false,
   nozzleDiameter = 0.4,
   extruderColors = ['#dddddd'],
+  sliceStats,
   onBack,
 }: GCodePreviewProps) {
   const totalLayers = parsedGCode.layers.length;
@@ -637,6 +641,49 @@ export function GCodePreview({
         <button className="gcode-preview-back" onClick={onBack}>
           Back
         </button>
+      )}
+      {sliceStats && (
+        <div className="gcode-stats-overlay">
+          {sliceStats.printTimeStr && (
+            <div className="gcode-stats-item">
+              <span className="gcode-stats-value">{sliceStats.printTimeStr}</span>
+            </div>
+          )}
+          {sliceStats.totalFilamentG > 0 && (
+            <div className="gcode-stats-item">
+              <span className="gcode-stats-value">
+                {sliceStats.totalFilamentG.toFixed(1)}g
+                {sliceStats.totalFilamentMm3 > 0 && (
+                  <span className="gcode-stats-secondary">
+                    {' '}({(sliceStats.totalFilamentMm3 / 1000).toFixed(1)}cm&sup3;)
+                  </span>
+                )}
+              </span>
+            </div>
+          )}
+          {sliceStats.totalCost > 0 && (
+            <div className="gcode-stats-item">
+              <span className="gcode-stats-value">${sliceStats.totalCost.toFixed(2)}</span>
+            </div>
+          )}
+          {sliceStats.totalToolchanges > 0 && (
+            <div className="gcode-stats-item">
+              <span className="gcode-stats-value">{sliceStats.totalToolchanges} tool changes</span>
+            </div>
+          )}
+          {sliceStats.wipeTowerFilament > 0 && (
+            <div className="gcode-stats-item">
+              <span className="gcode-stats-value">Wipe: {sliceStats.wipeTowerFilament.toFixed(1)}g</span>
+            </div>
+          )}
+          {Object.keys(sliceStats.perExtruderFilament).length > 1 &&
+            Object.entries(sliceStats.perExtruderFilament).map(([idx, grams]) => (
+              <div className="gcode-stats-item" key={idx}>
+                <span className="gcode-stats-value">T{Number(idx) + 1}: {grams.toFixed(1)}g</span>
+              </div>
+            ))
+          }
+        </div>
       )}
       <div className="gcode-color-toggle">
         <button

@@ -85,6 +85,12 @@ export function buildPlateSliceConfig(
     extruderCount,
   );
 
+  // Override prime tower position from plate config
+  if (plate.primeTower.enabled && extruderCount > 1) {
+    globalConfig['wipe_tower_x'] = String(plate.primeTower.position.x);
+    globalConfig['wipe_tower_y'] = String(plate.primeTower.position.y);
+  }
+
   // Override flush volumes if custom matrix is configured
   if (plate.flushVolumeConfig && extruderCount > 1) {
     const fvc = plate.flushVolumeConfig;
@@ -114,6 +120,16 @@ export function buildPlateSliceConfig(
       config = objectConfigDiff(globalConfig, fullObjectConfig);
     }
 
+    // Per-volume extruder assignments (convert 0-based UI → 1-based OrcaSlicer)
+    let volumeExtruders: Record<number, number> | undefined;
+    if (obj.volumeExtruders && obj.colorGroups && obj.colorGroups.length > 1) {
+      volumeExtruders = {};
+      for (const [volIdx, extruder] of Object.entries(obj.volumeExtruders)) {
+        // OrcaSlicer uses 1-based extruder indices
+        volumeExtruders[Number(volIdx)] = extruder + 1;
+      }
+    }
+
     return {
       data: obj.meshData,
       format: obj.meshFormat,
@@ -124,6 +140,7 @@ export function buildPlateSliceConfig(
       scaleY: obj.scale.y,
       scaleZ: obj.scale.z,
       config,
+      volumeExtruders,
     };
   });
 

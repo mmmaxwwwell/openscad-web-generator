@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { buildOrcaConfig, convertKlipperToOrcaGcode } from '../orca-slicer-settings';
+import { buildOrcaConfig, convertKlipperToOrcaGcode, getAutoValues } from '../orca-slicer-settings';
 import type { PrinterSettings } from '../slicer-settings';
 import { DEFAULT_PRINT_PROFILE } from '../../types/print-profile';
 import type { PrintProfile } from '../../types/print-profile';
@@ -2460,5 +2460,65 @@ describe('Per-object config diff — Phase 1 fields', () => {
     expect(diff['interlocking_orientation']).toBe('30');
     expect(diff['interlocking_beam_layer_count']).toBe('3');
     expect(diff['interlocking_depth']).toBe('4');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAutoValues — pre-slice approximation of "auto" (value=0) fields
+// ---------------------------------------------------------------------------
+
+describe('getAutoValues', () => {
+  const nozzles = [0.2, 0.4, 0.6, 0.8];
+
+  for (const nozzle of nozzles) {
+    describe(`nozzle ${nozzle}mm`, () => {
+      const retractionSpeed = 40;
+      const auto = getAutoValues(nozzle, retractionSpeed);
+
+      it('line widths equal nozzle diameter', () => {
+        expect(auto.lineWidth).toBe(nozzle);
+        expect(auto.outerWallLineWidth).toBe(nozzle);
+        expect(auto.innerWallLineWidth).toBe(nozzle);
+        expect(auto.topSurfaceLineWidth).toBe(nozzle);
+        expect(auto.internalSolidInfillLineWidth).toBe(nozzle);
+        expect(auto.sparseInfillLineWidth).toBe(nozzle);
+        expect(auto.supportLineWidth).toBe(nozzle);
+        expect(auto.initialLayerLineWidth).toBe(nozzle);
+      });
+
+      it('support interface spacing = nozzle × 0.75', () => {
+        expect(auto.supportInterfaceSpacing).toBeCloseTo(nozzle * 0.75, 6);
+      });
+
+      it('deretraction speed mirrors retraction speed', () => {
+        expect(auto.deretractionSpeed).toBe(retractionSpeed);
+      });
+
+      it('speed fields default to 0', () => {
+        expect(auto.overhang1_4Speed).toBe(0);
+        expect(auto.overhang2_4Speed).toBe(0);
+        expect(auto.overhang3_4Speed).toBe(0);
+        expect(auto.overhang4_4Speed).toBe(0);
+        expect(auto.scarfJointSpeed).toBe(0);
+        expect(auto.supportSpeed).toBe(0);
+        expect(auto.supportInterfaceSpeed).toBe(0);
+      });
+
+      it('bridge angle fields default to 0', () => {
+        expect(auto.bridgeAngle).toBe(0);
+        expect(auto.internalBridgeAngle).toBe(0);
+      });
+    });
+  }
+
+  it('deretraction speed varies with retraction speed', () => {
+    expect(getAutoValues(0.4, 20).deretractionSpeed).toBe(20);
+    expect(getAutoValues(0.4, 60).deretractionSpeed).toBe(60);
+    expect(getAutoValues(0.4, 0).deretractionSpeed).toBe(0);
+  });
+
+  it('returns exactly 19 fields', () => {
+    const auto = getAutoValues(0.4, 40);
+    expect(Object.keys(auto)).toHaveLength(19);
   });
 });

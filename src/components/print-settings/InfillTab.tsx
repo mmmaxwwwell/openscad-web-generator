@@ -34,9 +34,34 @@ const INFILL_PATTERNS: Array<{ value: PrintProfile['sparseInfillPattern']; label
   { value: 'octagramspiral', label: 'Octagram Spiral' },
 ];
 
-export function InfillTab({ profile, onChange, overrides, onResetField }: PrintSettingsTabProps) {
+/** Maps InfillTab auto field names to OrcaSlicer config key names */
+const INFILL_CONFIG_KEYS: Record<string, string> = {
+  sparseInfillLineWidth: 'sparse_infill_line_width',
+  bridgeAngle: 'bridge_angle',
+  internalBridgeAngle: 'internal_bridge_angle',
+};
+
+export function InfillTab({ profile, onChange, overrides, onResetField, autoValues, resolvedConfigs }: PrintSettingsTabProps) {
   const { oc, resetBtn } = createOverrideHelpers(overrides, onResetField);
   const lineWidthIsAuto = profile.sparseInfillLineWidth === 0;
+
+  /** Get post-slice resolved value for an auto field */
+  const getResolved = (fieldKey: string): number | undefined => {
+    const configKey = INFILL_CONFIG_KEYS[fieldKey];
+    if (configKey && resolvedConfigs?.[configKey]) {
+      const v = parseFloat(resolvedConfigs[configKey]);
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return undefined;
+  };
+
+  /** Get pre-slice auto value approximation */
+  const getAuto = (fieldKey: string): number | undefined => {
+    if (autoValues?.[fieldKey] !== undefined && autoValues[fieldKey] > 0) {
+      return autoValues[fieldKey];
+    }
+    return undefined;
+  };
 
   return (
     <>
@@ -72,17 +97,26 @@ export function InfillTab({ profile, onChange, overrides, onResetField }: PrintS
       </label>
       <label className={`print-dialog-field${oc('sparseInfillLineWidth')}`}>
         <span>Sparse Infill Line Width {lineWidthIsAuto ? '(auto)' : `(${profile.sparseInfillLineWidth} mm)`}{resetBtn('sparseInfillLineWidth')}</span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input type="number" value={lineWidthIsAuto ? 0.4 : profile.sparseInfillLineWidth}
-            disabled={lineWidthIsAuto} min={0.05} max={2.0} step={0.01}
-            style={{ flex: 1, opacity: lineWidthIsAuto ? 0.5 : 1 }}
-            onChange={(e) => onChange({ sparseInfillLineWidth: Number(e.target.value) })} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={lineWidthIsAuto}
-              onChange={(e) => onChange({ sparseInfillLineWidth: e.target.checked ? 0 : 0.4 })} />
-            Auto
-          </label>
-        </div>
+        {(() => {
+          const resolvedLW = getResolved('sparseInfillLineWidth');
+          const autoLW = getAuto('sparseInfillLineWidth') ?? 0.4;
+          const displayValue = resolvedLW ?? autoLW;
+          const isResolved = resolvedLW !== undefined;
+          return (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input type="number" value={lineWidthIsAuto ? displayValue : profile.sparseInfillLineWidth}
+                disabled={lineWidthIsAuto} min={0.05} max={2.0} step={0.01}
+                style={{ flex: 1, opacity: lineWidthIsAuto ? 0.5 : 1, fontStyle: lineWidthIsAuto ? 'italic' : 'normal' }}
+                onChange={(e) => onChange({ sparseInfillLineWidth: Number(e.target.value) })} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={lineWidthIsAuto}
+                  onChange={(e) => onChange({ sparseInfillLineWidth: e.target.checked ? 0 : displayValue })} />
+                Auto
+                {lineWidthIsAuto && <span style={{ opacity: 0.6, fontSize: '0.85em' }}>{isResolved ? '(resolved)' : '(est.)'}</span>}
+              </label>
+            </div>
+          );
+        })()}
       </label>
 
       <h4 className="print-dialog-subheading">Surface Patterns</h4>
@@ -137,31 +171,47 @@ export function InfillTab({ profile, onChange, overrides, onResetField }: PrintS
       </label>
       <label className={`print-dialog-field${oc('bridgeAngle')}`}>
         <span>Bridge Angle (&deg;){resetBtn('bridgeAngle')}</span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input type="number" value={profile.bridgeAngle} min={0} max={180}
-            disabled={profile.bridgeAngle === 0}
-            style={{ flex: 1, opacity: profile.bridgeAngle === 0 ? 0.5 : 1 }}
-            onChange={(e) => onChange({ bridgeAngle: Number(e.target.value) })} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={profile.bridgeAngle === 0}
-              onChange={(e) => onChange({ bridgeAngle: e.target.checked ? 0 : 45 })} />
-            Auto
-          </label>
-        </div>
+        {(() => {
+          const isAuto = profile.bridgeAngle === 0;
+          const resolved = getResolved('bridgeAngle');
+          return (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input type="number" value={isAuto ? (resolved ?? '') : profile.bridgeAngle} min={0} max={180}
+                disabled={isAuto}
+                placeholder={isAuto && !resolved ? 'auto' : undefined}
+                style={{ flex: 1, opacity: isAuto ? 0.5 : 1, fontStyle: isAuto ? 'italic' : 'normal' }}
+                onChange={(e) => onChange({ bridgeAngle: Number(e.target.value) })} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={isAuto}
+                  onChange={(e) => onChange({ bridgeAngle: e.target.checked ? 0 : (resolved ?? 45) })} />
+                Auto
+                {isAuto && resolved !== undefined && <span style={{ opacity: 0.6, fontSize: '0.85em' }}>(resolved)</span>}
+              </label>
+            </div>
+          );
+        })()}
       </label>
       <label className={`print-dialog-field${oc('internalBridgeAngle')}`}>
         <span>Internal Bridge Angle (&deg;){resetBtn('internalBridgeAngle')}</span>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <input type="number" value={profile.internalBridgeAngle} min={0} max={180}
-            disabled={profile.internalBridgeAngle === 0}
-            style={{ flex: 1, opacity: profile.internalBridgeAngle === 0 ? 0.5 : 1 }}
-            onChange={(e) => onChange({ internalBridgeAngle: Number(e.target.value) })} />
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-            <input type="checkbox" checked={profile.internalBridgeAngle === 0}
-              onChange={(e) => onChange({ internalBridgeAngle: e.target.checked ? 0 : 45 })} />
-            Auto
-          </label>
-        </div>
+        {(() => {
+          const isAuto = profile.internalBridgeAngle === 0;
+          const resolved = getResolved('internalBridgeAngle');
+          return (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input type="number" value={isAuto ? (resolved ?? '') : profile.internalBridgeAngle} min={0} max={180}
+                disabled={isAuto}
+                placeholder={isAuto && !resolved ? 'auto' : undefined}
+                style={{ flex: 1, opacity: isAuto ? 0.5 : 1, fontStyle: isAuto ? 'italic' : 'normal' }}
+                onChange={(e) => onChange({ internalBridgeAngle: Number(e.target.value) })} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={isAuto}
+                  onChange={(e) => onChange({ internalBridgeAngle: e.target.checked ? 0 : (resolved ?? 45) })} />
+                Auto
+                {isAuto && resolved !== undefined && <span style={{ opacity: 0.6, fontSize: '0.85em' }}>(resolved)</span>}
+              </label>
+            </div>
+          );
+        })()}
       </label>
     </>
   );

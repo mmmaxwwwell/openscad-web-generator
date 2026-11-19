@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-wasm32:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -25,7 +25,7 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      - name: Build OrcaSlicer WASM via Nix
+      - name: Build OrcaSlicer WASM (wasm32)
         run: nix build .#orcaslicer-wasm --print-build-logs
 
       - name: Verify build output
@@ -35,20 +35,83 @@ jobs:
           test -f result/libslic3r.wasm
           echo "libslic3r.wasm size: $(du -h result/libslic3r.wasm | cut -f1)"
 
+      - name: Upload wasm32 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm32
+          path: |
+            result/libslic3r.js
+            result/libslic3r.wasm
+            result/libslic3r.worker.js
+
+  build-wasm64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build OrcaSlicer WASM (wasm64 / Memory64)
+        run: nix build .#orcaslicer-wasm64 --print-build-logs
+
+      - name: Verify build output
+        run: |
+          ls -lh result/
+          test -f result/libslic3r-wasm64.js
+          test -f result/libslic3r-wasm64.wasm
+          echo "libslic3r-wasm64.wasm size: $(du -h result/libslic3r-wasm64.wasm | cut -f1)"
+
+      - name: Upload wasm64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm64
+          path: |
+            result/libslic3r-wasm64.js
+            result/libslic3r-wasm64.wasm
+            result/libslic3r-wasm64.worker.js
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-wasm32, build-wasm64]
+    steps:
+      - name: Download wasm32 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm32
+          path: wasm32
+
+      - name: Download wasm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm64
+          path: wasm64
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag }}
           name: "OrcaSlicer WASM ${{ github.event.inputs.tag }}"
           body: |
-            Pre-built OrcaSlicer libslic3r WASM artifacts.
+            Pre-built OrcaSlicer libslic3r WASM artifacts (wasm32 + wasm64).
 
-            Built from commit ${{ github.sha }} via `nix build .#orcaslicer-wasm`.
+            Built from commit ${{ github.sha }} via `nix build .#orcaslicer-wasm` and `nix build .#orcaslicer-wasm64`.
+
+            **wasm32** (standard, 4GB max) — loaded by default, faster due to bounds-check elimination.
+            **wasm64** (Memory64, 8GB max) — used as fallback when wasm32 OOMs. Requires Chrome 133+ or Firefox 134+.
 
             These artifacts are downloaded automatically by the deploy workflow
             and by `scripts/download-slicer-wasm.mjs`.
           files: |
-            result/libslic3r.js
-            result/libslic3r.wasm
-            result/libslic3r.worker.js
+            wasm32/libslic3r.js
+            wasm32/libslic3r.wasm
+            wasm32/libslic3r.worker.js
+            wasm64/libslic3r-wasm64.js
+            wasm64/libslic3r-wasm64.wasm
+            wasm64/libslic3r-wasm64.worker.js
           fail_on_unmatched_files: false

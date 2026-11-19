@@ -36,3 +36,13 @@ export function createOverrideHelpers(
 
   return { oc, resetBtn };
 }
+
+/** Warning indicator shown next to plate-level fields that have per-object overrides */
+export function PerObjectWarning({ field, perObjectOverrides }: { field: keyof PrintProfile; perObjectOverrides?: Set<keyof PrintProfile> }) {
+  if (!perObjectOverrides?.has(field)) return null;
+  return (
+    <span className="build-plate-field-override-warning" title="This value is overridden on one or more objects">
+      &#9888;
+    </span>
+  );
+}

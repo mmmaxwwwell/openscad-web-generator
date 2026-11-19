@@ -4,6 +4,12 @@
 /**
  * Downloads pre-built OrcaSlicer libslic3r WASM artifacts from GitHub releases.
  * Fallback for CI or non-Nix environments where building from source is impractical.
+ *
+ * Downloads both wasm32 (required) and wasm64 (optional) variants.
+ *
+ * Options:
+ *   --force      Re-download even if artifacts already exist
+ *   --no-wasm64  Skip downloading wasm64 artifacts
  */
 
 import { createWriteStream, existsSync, mkdirSync } from 'fs';
@@ -18,15 +24,25 @@ const WASM_DIR = join(ROOT, 'public', 'wasm');
 const REPO = 'mmmaxwwwell/openscad-web-generator';
 const GITHUB_API = `https://api.github.com/repos/${REPO}/releases`;
 
-// Required artifacts
+// wasm32 artifacts (required)
 const REQUIRED_ASSETS = [
   'libslic3r.js',
   'libslic3r.wasm',
 ];
 
-// Optional artifacts (pthreads worker)
+// wasm32 optional artifacts (pthreads worker)
 const OPTIONAL_ASSETS = [
   'libslic3r.worker.js',
+];
+
+// wasm64 artifacts (all optional — app works without them)
+const WASM64_ASSETS = [
+  'libslic3r-wasm64.js',
+  'libslic3r-wasm64.wasm',
+];
+
+const WASM64_OPTIONAL = [
+  'libslic3r-wasm64.worker.js',
 ];
 
 async function fetchJSON(url) {
@@ -86,14 +102,38 @@ async function findSlicerRelease() {
   return null;
 }
 
+/**
+ * Download a list of assets from a release. Required assets cause failure if missing.
+ */
+async function downloadAssets(assets, names, label, required = true) {
+  let downloaded = 0;
+  for (const name of names) {
+    const asset = assets.find(a => a.name === name);
+    if (!asset) {
+      if (required) {
+        console.error(`ERROR: Required ${label} asset "${name}" not found in release.`);
+        process.exit(1);
+      }
+      continue;
+    }
+    const dest = join(WASM_DIR, name);
+    console.log(`  ${name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)...`);
+    await downloadFile(asset.browser_download_url, dest);
+    downloaded++;
+  }
+  return downloaded;
+}
+
 async function main() {
   const force = process.argv.includes('--force');
+  const skipWasm64 = process.argv.includes('--no-wasm64');
 
-  // Check if already downloaded
-  const allExist = REQUIRED_ASSETS.every(f => existsSync(join(WASM_DIR, f)));
-  if (allExist && !force) {
-    console.log('OrcaSlicer WASM files already present. Use --force to re-download.');
-    return;
+  // Check if wasm32 already downloaded
+  const wasm32Exist = REQUIRED_ASSETS.every(f => existsSync(join(WASM_DIR, f)));
+  if (wasm32Exist && !force) {
+    console.log('OrcaSlicer WASM (wasm32) files already present. Use --force to re-download.');
+    if (skipWasm64) return;
+    // Still check wasm64 below
   }
 
   mkdirSync(WASM_DIR, { recursive: true });
@@ -112,25 +152,27 @@ async function main() {
   console.log(`Found release: ${release.tag_name}`);
   const assets = release.assets || [];
 
-  for (const name of REQUIRED_ASSETS) {
-    const asset = assets.find(a => a.name === name);
-    if (!asset) {
-      console.error(`ERROR: Required asset "${name}" not found in release ${release.tag_name}.`);
-      process.exit(1);
-    }
-    const dest = join(WASM_DIR, name);
-    console.log(`Downloading ${name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)...`);
-    await downloadFile(asset.browser_download_url, dest);
-    console.log(`  -> ${dest}`);
+  // --- wasm32 (required) ---
+  if (!wasm32Exist || force) {
+    console.log('Downloading wasm32 artifacts:');
+    await downloadAssets(assets, REQUIRED_ASSETS, 'wasm32', true);
+    await downloadAssets(assets, OPTIONAL_ASSETS, 'wasm32', false);
   }
 
-  for (const name of OPTIONAL_ASSETS) {
-    const asset = assets.find(a => a.name === name);
-    if (asset) {
-      const dest = join(WASM_DIR, name);
-      console.log(`Downloading ${name} (${(asset.size / 1024 / 1024).toFixed(1)} MB)...`);
-      await downloadFile(asset.browser_download_url, dest);
-      console.log(`  -> ${dest}`);
+  // --- wasm64 (optional) ---
+  if (!skipWasm64) {
+    const wasm64Exist = WASM64_ASSETS.every(f => existsSync(join(WASM_DIR, f)));
+    if (wasm64Exist && !force) {
+      console.log('OrcaSlicer WASM (wasm64) files already present.');
+    } else {
+      const hasAnyWasm64 = WASM64_ASSETS.some(name => assets.some(a => a.name === name));
+      if (hasAnyWasm64) {
+        console.log('Downloading wasm64 artifacts:');
+        await downloadAssets(assets, WASM64_ASSETS, 'wasm64', false);
+        await downloadAssets(assets, WASM64_OPTIONAL, 'wasm64', false);
+      } else {
+        console.log('No wasm64 artifacts in this release (optional — app works without them).');
+      }
     }
   }
 

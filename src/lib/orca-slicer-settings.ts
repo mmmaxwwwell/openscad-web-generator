@@ -244,6 +244,53 @@ const TIMELAPSE_TYPE_MAP: Record<string, string> = {
 };
 
 /**
+ * Compute approximate "auto" values for PrintProfile fields where 0 means auto.
+ *
+ * These are pre-slice approximations for instant UI feedback. After slicing,
+ * the resolved values from `getResolvedConfigs()` are authoritative and should
+ * override these.
+ *
+ * @param nozzleDiameter - Nozzle diameter in mm (e.g. 0.4)
+ * @param retractionSpeed - Current retraction speed in mm/s (for deretraction fallback)
+ * @returns Map of PrintProfile field names to approximate auto values
+ */
+export function getAutoValues(
+  nozzleDiameter: number,
+  retractionSpeed: number,
+): Record<string, number> {
+  return {
+    // Line widths: default to nozzle diameter when auto (0)
+    lineWidth: nozzleDiameter,
+    outerWallLineWidth: nozzleDiameter,
+    innerWallLineWidth: nozzleDiameter,
+    topSurfaceLineWidth: nozzleDiameter,
+    internalSolidInfillLineWidth: nozzleDiameter,
+    sparseInfillLineWidth: nozzleDiameter,
+    supportLineWidth: nozzleDiameter,
+    initialLayerLineWidth: nozzleDiameter,
+
+    // Speeds: can't approximate without slicing (geometry/config dependent)
+    overhang1_4Speed: 0,
+    overhang2_4Speed: 0,
+    overhang3_4Speed: 0,
+    overhang4_4Speed: 0,
+    scarfJointSpeed: 0,
+    supportSpeed: 0,
+    supportInterfaceSpeed: 0,
+
+    // Bridge angles: geometry-dependent, can't approximate
+    bridgeAngle: 0,
+    internalBridgeAngle: 0,
+
+    // Support interface spacing: derived from nozzle diameter
+    supportInterfaceSpacing: nozzleDiameter * 0.75,
+
+    // Deretraction speed: mirrors retraction speed when auto
+    deretractionSpeed: retractionSpeed,
+  };
+}
+
+/**
  * Build OrcaSlicer config entries from our settings.
  *
  * Returns Record<string, string> matching OrcaSlicer .ini config keys.
@@ -615,6 +662,22 @@ export function buildOrcaConfig(
     config['enable_prime_tower'] = p.enablePrimeTower ? '1' : '0';
     config['prime_tower_width'] = String(p.primeTowerWidth);
     config['prime_tower_brim_width'] = String(p.primeTowerBrimWidth);
+
+    // Prime tower position — place near front-right corner of bed by default.
+    // wipe_tower_x/y are ConfigOptionFloats (arrays for multi-plate) but
+    // a single value works for our single-plate use case.
+    if (p.enablePrimeTower) {
+      const towerSize = p.primeTowerWidth + p.primeTowerBrimWidth * 2;
+      const bedW = ps.bedWidth;
+      const bedD = ps.bedDepth;
+      if (ps.originCenter) {
+        config['wipe_tower_x'] = String(bedW / 2 - towerSize - 5);
+        config['wipe_tower_y'] = String(-bedD / 2 + 5);
+      } else {
+        config['wipe_tower_x'] = String(bedW - towerSize - 5);
+        config['wipe_tower_y'] = String(5);
+      }
+    }
 
     // Flush volumes: NxN matrix (row=from, col=to) of purge volumes in mm³.
     // Diagonal is 0 (same filament). Off-diagonal uses profile flush volume.

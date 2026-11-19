@@ -76,9 +76,12 @@ async function addParametricCube(page) {
 // Helper: Select the first object and wait for the right panel to open
 // ---------------------------------------------------------------------------
 async function selectFirstObject(page) {
-  await page.locator('.build-plate-object-item').first().click();
-  // Wait for right panel with SCAD params section
-  await page.locator('.build-plate-scad-params-section').waitFor({ timeout: 10_000 });
+  // Object may already be auto-selected — check if SCAD params section is visible
+  const paramsSection = page.locator('.build-plate-scad-params-section');
+  if (await paramsSection.isVisible().catch(() => false)) return;
+  // Use force:true because the section toggle can overlap the object item in small viewports
+  await page.locator('.build-plate-object-item').first().click({ force: true });
+  await paramsSection.waitFor({ timeout: 10_000 });
 }
 
 // ---------------------------------------------------------------------------
@@ -110,7 +113,7 @@ async function changeParam(page, paramName, newValue) {
 // Helper: Click Re-render and wait for completion
 // ---------------------------------------------------------------------------
 async function reRenderAndWait(page) {
-  const btn = page.locator('.build-plate-rerender-actions .build-plate-btn--primary', { hasText: 'Re-render' });
+  const btn = page.locator('.build-plate-rerender-actions .build-plate-btn--primary').filter({ hasText: /^Re-render$/ });
   await btn.click();
 
   // Wait for button to return to "Re-render" (not "Rendering...") and be enabled
@@ -332,8 +335,11 @@ async function testMulticolorRerender({ page, baseUrl }) {
 
   // Step 5: Select object — opens right panel with SCAD params
   log('STEP', 'Selecting object...');
-  await objectItem.first().click();
-  await page.locator('.build-plate-scad-params-section').waitFor({ timeout: 10_000 });
+  const paramsSection = page.locator('.build-plate-scad-params-section');
+  if (!await paramsSection.isVisible().catch(() => false)) {
+    await objectItem.first().click({ force: true });
+    await paramsSection.waitFor({ timeout: 10_000 });
+  }
   log('OK', 'SCAD parameters section visible');
 
   // Verify "Re-render Multicolor" button is visible (requires colorGroups)

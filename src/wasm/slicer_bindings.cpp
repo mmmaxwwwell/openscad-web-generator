@@ -380,6 +380,21 @@ public:
         return idx;
     }
 
+    // Set the extruder assignment for a specific volume within an object.
+    // objectIndex and volumeIndex are 0-based. extruder is 1-based (OrcaSlicer convention).
+    void setVolumeExtruder(int objectIndex, int volumeIndex, int extruder) {
+        if (objectIndex < 0 || objectIndex >= static_cast<int>(m_model.objects.size())) {
+            throw std::runtime_error("Object index out of range: " + std::to_string(objectIndex));
+        }
+        auto* obj = m_model.objects[objectIndex];
+        if (volumeIndex < 0 || volumeIndex >= static_cast<int>(obj->volumes.size())) {
+            throw std::runtime_error("Volume index out of range: " + std::to_string(volumeIndex));
+        }
+        obj->volumes[volumeIndex]->config.set("extruder", extruder);
+        EM_ASM({ console.log('[slicer-wasm] Set object', $0, 'volume', $1, 'extruder =', $2); },
+               objectIndex, volumeIndex, extruder);
+    }
+
     // Set a per-object config override. The key/value follow OrcaSlicer .ini format.
     // objectIndex is 0-based, matching the order objects were added.
     void setObjectConfig(int objectIndex, const std::string& key, const std::string& value) {
@@ -510,6 +525,12 @@ public:
                        warning.string.c_str());
             }
 
+            // Log memory usage before slicing for OOM diagnosis
+            EM_ASM({
+                var heapUsed = Module.HEAP8 ? Module.HEAP8.length : 0;
+                console.log('[slicer-wasm] Heap size before process():', (heapUsed / 1024 / 1024).toFixed(1), 'MB');
+            });
+
             // Run the slicing and G-code generation pipeline
             EM_ASM({ console.log('[slicer-wasm] Starting Print::process()...'); });
             m_print->process();
@@ -520,6 +541,9 @@ public:
             std::string msg = std::string("Slicing error: ") + e.what();
             EM_ASM({ console.error('[slicer-wasm]', UTF8ToString($0)); }, msg.c_str());
             throw std::runtime_error(msg);
+        } catch (const std::bad_alloc& e) {
+            EM_ASM({ console.error('[slicer-wasm] slice() failed: out of memory (std::bad_alloc)'); });
+            throw std::runtime_error("out of memory: allocation failed (std::bad_alloc)");
         } catch (const std::exception& e) {
             std::string msg = std::string("slice() failed: ") + e.what();
             EM_ASM({ console.error('[slicer-wasm]', UTF8ToString($0)); }, msg.c_str());
@@ -528,6 +552,108 @@ public:
             EM_ASM({ console.error('[slicer-wasm] slice() failed with unknown exception type'); });
             throw std::runtime_error("slice() failed with unknown C++ exception");
         }
+    }
+
+    // Return print statistics as a JSON string.
+    // Must call slice() first — stats are populated during process().
+    std::string getSliceStats() {
+        if (!m_sliced || !m_print) {
+            throw std::runtime_error("Not sliced. Call slice() first.");
+        }
+
+        const auto& stats = m_print->print_statistics();
+
+        // Get layer counts: max across all objects
+        size_t max_layers = 0;
+        size_t max_support_layers = 0;
+        for (const auto* obj : m_print->objects()) {
+            if (obj->layer_count() > max_layers)
+                max_layers = obj->layer_count();
+            if (obj->support_layer_count() > max_support_layers)
+                max_support_layers = obj->support_layer_count();
+        }
+
+        // Build JSON manually (no JSON library available)
+        std::ostringstream json;
+        json << "{";
+        json << "\"estimated_normal_print_time\":\"" << stats.estimated_normal_print_time << "\"";
+        json << ",\"total_used_filament\":" << stats.total_used_filament;
+        json << ",\"total_extruded_volume\":" << stats.total_extruded_volume;
+        json << ",\"total_weight\":" << stats.total_weight;
+        json << ",\"total_cost\":" << stats.total_cost;
+        json << ",\"total_toolchanges\":" << stats.total_toolchanges;
+        json << ",\"initial_tool\":" << stats.initial_tool;
+        json << ",\"total_wipe_tower_filament\":" << stats.total_wipe_tower_filament;
+        json << ",\"layer_count\":" << max_layers;
+        json << ",\"support_layer_count\":" << max_support_layers;
+
+        // Per-extruder filament usage (map of extruder index → grams)
+        json << ",\"filament_stats\":{";
+        bool first = true;
+        for (const auto& kv : stats.filament_stats) {
+            if (!first) json << ",";
+            json << "\"" << kv.first << "\":" << kv.second;
+            first = false;
+        }
+        json << "}";
+
+        json << "}";
+        return json.str();
+    }
+
+    // Query a single resolved config value by OrcaSlicer key name.
+    // Must be called AFTER slice() — config is resolved during apply().
+    // Returns the resolved value as a string (same format as setConfigString input).
+    std::string getResolvedConfig(const std::string& key) {
+        if (!m_sliced || !m_print) {
+            throw std::runtime_error("Not sliced. Call slice() first.");
+        }
+
+        const auto& config = m_print->full_print_config();
+        try {
+            return config.opt_serialize(key);
+        } catch (...) {
+            // Key not found or not serializable — return empty string
+            return "";
+        }
+    }
+
+    // Return multiple resolved config values at once as a JSON object.
+    // Keys are OrcaSlicer config key names, values are resolved strings.
+    // More efficient than calling getResolvedConfig() one key at a time.
+    std::string getResolvedConfigs(const emscripten::val& keys) {
+        if (!m_sliced || !m_print) {
+            throw std::runtime_error("Not sliced. Call slice() first.");
+        }
+
+        const auto& config = m_print->full_print_config();
+        int length = keys["length"].as<int>();
+
+        std::ostringstream json;
+        json << "{";
+        bool first = true;
+        for (int i = 0; i < length; ++i) {
+            std::string key = keys[i].as<std::string>();
+            std::string value;
+            try {
+                value = config.opt_serialize(key);
+            } catch (...) {
+                continue; // Skip keys that don't exist
+            }
+
+            if (!first) json << ",";
+            // Escape the value for JSON (handle quotes and backslashes)
+            json << "\"" << key << "\":\"";
+            for (char c : value) {
+                if (c == '"') json << "\\\"";
+                else if (c == '\\') json << "\\\\";
+                else json << c;
+            }
+            json << "\"";
+            first = false;
+        }
+        json << "}";
+        return json.str();
     }
 
     // Export the sliced result as G-code string.
@@ -588,11 +714,15 @@ EMSCRIPTEN_BINDINGS(slicer_module) {
         .function("setConfigString", &WasmSlicer::setConfigString)
         .function("slice", &WasmSlicer::slice)
         .function("exportGCode", &WasmSlicer::exportGCode)
+        .function("getSliceStats", &WasmSlicer::getSliceStats)
+        .function("getResolvedConfig", &WasmSlicer::getResolvedConfig)
+        .function("getResolvedConfigs", &WasmSlicer::getResolvedConfigs)
         // Multi-object Build Plate API
         .function("clearModel", &WasmSlicer::clearModel)
         .function("addSTLObject", &WasmSlicer::addSTLObject)
         .function("add3MFObject", &WasmSlicer::add3MFObject)
         .function("setObjectConfig", &WasmSlicer::setObjectConfig)
+        .function("setVolumeExtruder", &WasmSlicer::setVolumeExtruder)
         .function("setPrintSequence", &WasmSlicer::setPrintSequence)
         .function("getObjectCount", &WasmSlicer::getObjectCount)
         ;

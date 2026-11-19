@@ -42,8 +42,11 @@
 
         packages.openscad-wasm = pkgs.callPackage ./nix/openscad-wasm.nix {};
         packages.orcaslicer-deps = pkgs.callPackage ./nix/orcaslicer-deps.nix {};
+        packages.orcaslicer-deps-wasm64 = pkgs.callPackage ./nix/orcaslicer-deps.nix { memory64 = true; };
         packages.orcaslicer-lib = pkgs.callPackage ./nix/orcaslicer-lib.nix {};
+        packages.orcaslicer-lib-wasm64 = pkgs.callPackage ./nix/orcaslicer-lib.nix { memory64 = true; };
         packages.orcaslicer-wasm = pkgs.callPackage ./nix/orcaslicer-wasm.nix {};
+        packages.orcaslicer-wasm64 = pkgs.callPackage ./nix/orcaslicer-wasm.nix { memory64 = true; };
         packages.orcaslicer-android-arm64 = pkgs.callPackage ./nix/orcaslicer-android.nix {
           androidNdk = androidNdkPath;
           androidAbi = "arm64-v8a";

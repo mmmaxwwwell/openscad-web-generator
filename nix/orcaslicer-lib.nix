@@ -20,10 +20,12 @@
 , ninja
 , python3
 , callPackage
+, memory64 ? false
 }:
 
 let
-  deps = callPackage ./orcaslicer-deps.nix {};
+  deps = callPackage ./orcaslicer-deps.nix { inherit memory64; };
+  m64flag = lib.optionalString memory64 " -sMEMORY64=1";
 
   orcaSlicerSrc = fetchFromGitHub {
     owner = "SoftFever";
@@ -34,7 +36,7 @@ let
 
 in
 stdenv.mkDerivation {
-  pname = "orcaslicer-lib";
+  pname = "orcaslicer-lib${lib.optionalString memory64 "-wasm64"}";
   version = "2.3.1";
 
   src = orcaSlicerSrc;
@@ -63,12 +65,12 @@ stdenv.mkDerivation {
     # -D_REENTRANT: Boost.Thread headers require this (normally set by -pthread).
     # We define it manually to satisfy the header checks without pulling in
     # Emscripten's pthreads runtime (which causes deadlocks in Web Workers).
-    export CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DSMALL_WASM_BINARY=1"
-    export CXXFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DBOOST_LOG_NO_THREADS -DSMALL_WASM_BINARY=1 -Wno-c++11-narrowing"
-    export LDFLAGS="-fexceptions"
+    export CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DSMALL_WASM_BINARY=1${m64flag}"
+    export CXXFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DBOOST_LOG_NO_THREADS -DSMALL_WASM_BINARY=1 -Wno-c++11-narrowing${m64flag}"
+    export LDFLAGS="-fexceptions${m64flag}"
     # EMCC_CFLAGS is injected by emscripten into EVERY compile command,
     # regardless of what CMake does with CMAKE_C_FLAGS/CMAKE_CXX_FLAGS.
-    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT"
+    export EMCC_CFLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT${m64flag}"
 
     # Work in a copy of the source tree so we can patch files
     cp -r $src $TMPDIR/orcaslicer
@@ -764,10 +766,11 @@ TOPLEVEL_CMAKE
       -DCMAKE_PREFIX_PATH=${deps} \
       -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
       -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_SIZEOF_VOID_P=${if memory64 then "8" else "4"} \
       -DCMAKE_CXX_COMPILER=em++ \
       -DCMAKE_C_COMPILER=emcc \
-      -DCMAKE_C_FLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DSMALL_WASM_BINARY=1" \
-      -DCMAKE_CXX_FLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DBOOST_LOG_NO_THREADS -DSMALL_WASM_BINARY=1 -Wno-c++11-narrowing" \
+      -DCMAKE_C_FLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DSMALL_WASM_BINARY=1${m64flag}" \
+      -DCMAKE_CXX_FLAGS="-fexceptions -matomics -mbulk-memory -D_REENTRANT -DBOOST_LOG_NO_THREADS -DSMALL_WASM_BINARY=1 -Wno-c++11-narrowing${m64flag}" \
       -DCMAKE_FIND_ROOT_PATH=${deps} \
       -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
       -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \

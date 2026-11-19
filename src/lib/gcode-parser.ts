@@ -80,27 +80,53 @@ function featureToMoveType(feature: string): MoveType {
   }
 }
 
-/** Map PrusaSlicer ;TYPE:<type> comments to our MoveType */
+/** Map PrusaSlicer/OrcaSlicer ;TYPE:<type> comments to our MoveType.
+ *
+ * PrusaSlicer and OrcaSlicer use different type names in GCode comments:
+ *   PrusaSlicer: "Perimeter", "External perimeter", "Support material", etc.
+ *   OrcaSlicer:  "Inner wall", "Outer wall", "Support", etc.
+ * Both formats are supported here.
+ */
 function prusaTypeToMoveType(type: string): MoveType {
   switch (type) {
+    // PrusaSlicer wall types
     case 'Perimeter':
     case 'External perimeter':
     case 'Overhang perimeter':
     case 'Gap fill':
+    // OrcaSlicer wall types
+    case 'Inner wall':
+    case 'Outer wall':
+    case 'Overhang wall':
+    case 'Gap infill':
       return 'wall';
+    // PrusaSlicer infill types
     case 'Internal infill':
     case 'Bridge infill':
+    // OrcaSlicer infill types
+    case 'Sparse infill':
+    case 'Internal Bridge':
       return 'infill';
+    // PrusaSlicer solid fill types
     case 'Solid infill':
     case 'Top solid infill':
+    // OrcaSlicer solid fill types
+    case 'Internal solid infill':
+    case 'Top surface':
+    case 'Bottom surface':
       return 'solid-fill';
+    // PrusaSlicer support types
     case 'Support material':
     case 'Support material interface':
+    // OrcaSlicer support types
+    case 'Support':
+    case 'Support interface':
       return 'support';
     case 'Skirt':
     case 'Skirt/Brim':
       return 'brim';
     case 'Wipe tower':
+    case 'Prime tower':  // OrcaSlicer name
       return 'purge-tower';
     default:
       return 'other';

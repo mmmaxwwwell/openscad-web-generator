@@ -27,6 +27,7 @@ export interface BuildPlateObjectSettingsProps {
     scale?: { x: number; y: number; z: number };
   }) => void;
   onSetExtruder?: (id: string, extruder: number) => void;
+  onSetVolumeExtruder?: (id: string, volumeIndex: number, extruder: number) => void;
 }
 
 // ── Tab definitions ──────────────────────────────────────────────────────
@@ -57,6 +58,7 @@ export function BuildPlateObjectSettings({
   onResetField,
   onUpdateTransform,
   onSetExtruder,
+  onSetVolumeExtruder,
 }: BuildPlateObjectSettingsProps) {
   const [activeTab, setActiveTab] = useState<SettingsTabKey>('quality');
   const [uniformScale, setUniformScale] = useState(true);
@@ -230,25 +232,50 @@ export function BuildPlateObjectSettings({
         </div>
       </div>
 
-      {/* Extruder assignment (multicolor objects) */}
-      {object.colorGroups && onSetExtruder && (
+      {/* Extruder assignment */}
+      {object.colorGroups && object.colorGroups.length > 1 && onSetVolumeExtruder ? (
+        <div className="build-plate-extruder-section">
+          <h4>Color → Extruder</h4>
+          {object.colorGroups.map((cg, i) => {
+            const extruder = object.volumeExtruders?.[i] ?? i;
+            return (
+              <label key={i} className="print-dialog-field print-dialog-extruder-row">
+                <span className="print-dialog-color-label">
+                  <span
+                    className="print-dialog-color-swatch"
+                    style={{ backgroundColor: cg.color?.slice(0, 7) || '#888' }}
+                  />
+                  Color {i + 1}
+                </span>
+                <select
+                  value={extruder}
+                  onChange={(e) => onSetVolumeExtruder(object.id, i, Number(e.target.value))}
+                >
+                  {Array.from({ length: Math.max(object.colorGroups!.length, 4) }, (_, ei) => (
+                    <option key={ei} value={ei}>Extruder {ei + 1} (T{ei})</option>
+                  ))}
+                </select>
+              </label>
+            );
+          })}
+        </div>
+      ) : object.colorGroups && onSetExtruder ? (
         <div className="build-plate-extruder-section">
           <h4>Extruder Assignment</h4>
           <label className="print-dialog-field">
-            <span>Default Extruder</span>
+            <span>Extruder</span>
             <select
               value={object.extruderAssignment ?? 0}
               onChange={(e) => onSetExtruder(object.id, Number(e.target.value))}
             >
-              {object.colorGroups.map((cg, i) => (
-                <option key={i} value={i}>
-                  Extruder {i + 1}{cg.color ? ` (${cg.color})` : ''}
-                </option>
-              ))}
+              <option value={0}>Extruder 1 (T0)</option>
+              <option value={1}>Extruder 2 (T1)</option>
+              <option value={2}>Extruder 3 (T2)</option>
+              <option value={3}>Extruder 4 (T3)</option>
             </select>
           </label>
         </div>
-      )}
+      ) : null}
 
       {/* Override summary + reset */}
       <div className="build-plate-override-summary">

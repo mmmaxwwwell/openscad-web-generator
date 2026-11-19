@@ -9,20 +9,36 @@
  *     — slice a multi-color 3MF model
  *   { type: 'slicePlate', objects: Array<PlateObjectMsg>, globalConfig: Record<string, string>, printSequence?: string }
  *     — slice a multi-object build plate
+ *   { type: 'getResolvedConfigs', keys: string[] }
+ *     — query resolved config values from the last slice (engine must still be alive)
  *   { type: 'cancel' }
  *     — cancel current operation (best-effort; WASM slicing is not interruptible)
  *
  * Messages OUT:
  *   { type: 'progress', stage: string, progress: number }
  *     — progress update (0..1 within stage)
- *   { type: 'done', gcode: string, stats: { printTime?: number, filamentUsed?: number } }
- *     — slicing complete
+ *   { type: 'done', gcode: string, stats: { printTime?: number, filamentUsed?: number }, nativeStats?: SliceStats, resolvedConfigs?: Record<string, string> }
+ *     — slicing complete (nativeStats and resolvedConfigs available when WASM supports them)
+ *   { type: 'resolvedConfigs', configs: Record<string, string> }
+ *     — response to getResolvedConfigs request
  *   { type: 'error', message: string }
  *     — slicing failed
  */
 
-import { createSlicerEngine, type SlicerEngine } from '../lib/slicer-engine';
+import { createSlicerEngine, supportsMemory64, type SlicerEngine } from '../lib/slicer-engine';
 import { parseGcodeStats } from '../hooks/useSlicer';
+import type { SliceStats } from '../types/print-profile';
+
+/** OrcaSlicer config keys where value=0 means "auto" and the slicer resolves them */
+const AUTO_RESOLVE_KEYS = [
+  'line_width', 'outer_wall_line_width', 'inner_wall_line_width',
+  'top_surface_line_width', 'internal_solid_infill_line_width',
+  'sparse_infill_line_width', 'support_line_width', 'initial_layer_line_width',
+  'overhang_1_4_speed', 'overhang_2_4_speed', 'overhang_3_4_speed', 'overhang_4_4_speed',
+  'scarf_joint_speed', 'support_speed', 'support_interface_speed',
+  'support_interface_spacing', 'bridge_angle', 'internal_bridge_angle',
+  'deretraction_speed',
+];
 
 /** Shape of each object in a slicePlate message */
 export interface PlateObjectMsg {
@@ -35,10 +51,43 @@ export interface PlateObjectMsg {
   scaleY: number;
   scaleZ: number;
   config?: Record<string, string>;
+  /** Per-volume extruder assignments (volume index → 1-based extruder) */
+  volumeExtruders?: Record<number, number>;
 }
 
 let cancelled = false;
 let engine: SlicerEngine | null = null;
+
+/** Destroy the current engine if it exists, freeing C++ memory */
+function destroyEngine(): void {
+  if (engine) {
+    try {
+      engine.destroy();
+    } catch {
+      // Ignore cleanup errors
+    }
+    engine = null;
+  }
+}
+
+/**
+ * Detect whether an error is an out-of-memory condition.
+ * Emscripten throws various error messages for OOM — match the common patterns.
+ */
+function isOomError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /out of memory|Cannot enlarge memory|memory access out of bounds|Aborted\(OOM\)|allocation failed|bad_alloc/i.test(msg);
+}
+
+/** Query native stats and resolved configs from the engine after slicing */
+function getEngineResults(engine: SlicerEngine): {
+  nativeStats: SliceStats | null;
+  resolvedConfigs: Record<string, string>;
+} {
+  const nativeStats = engine.getSliceStats();
+  const resolvedConfigs = engine.getResolvedConfigs(AUTO_RESOLVE_KEYS);
+  return { nativeStats, resolvedConfigs };
+}
 
 function sendProgress(stage: string, progress: number, message?: string): void {
   if (!cancelled) {
@@ -50,13 +99,18 @@ async function handleSlice(
   data: ArrayBuffer,
   config: Record<string, string>,
   format: 'stl' | '3mf',
+  wasm64 = false,
 ): Promise<void> {
   cancelled = false;
+  // Destroy any previous engine before creating a new one
+  destroyEngine();
+
+  const variantLabel = wasm64 ? 'WASM64' : 'WASM';
 
   try {
     // Load the WASM module and create a fresh engine instance
-    sendProgress('loading', 0);
-    engine = await createSlicerEngine();
+    sendProgress('loading', 0, `Loading ${variantLabel} slicer engine...`);
+    engine = await createSlicerEngine(wasm64);
     if (cancelled) return;
     sendProgress('loading', 1);
 
@@ -91,11 +145,26 @@ async function handleSlice(
 
     if (cancelled) return;
 
-    // Parse stats from GCode comments
+    // Get native stats + resolved configs from C++ (if available)
+    // Engine stays alive so getResolvedConfigs can be called later
+    const { nativeStats, resolvedConfigs } = getEngineResults(engine);
+
+    // Parse stats from GCode comments as fallback
     const stats = parseGcodeStats(gcode);
 
-    self.postMessage({ type: 'done', gcode, stats });
+    const engineName = wasm64 ? 'WASM64' : 'WASM';
+    self.postMessage({ type: 'done', gcode, stats, nativeStats, resolvedConfigs, engineName });
   } catch (err) {
+    // Destroy engine on error — no useful state to query
+    destroyEngine();
+
+    // OOM retry: if wasm32 ran out of memory, retry with wasm64 (if supported)
+    if (!wasm64 && !cancelled && isOomError(err) && supportsMemory64()) {
+      console.warn('[slicer-worker] wasm32 OOM — retrying with wasm64...');
+      sendProgress('loading', 0, 'Out of memory — retrying with WASM64 (larger address space)...');
+      return handleSlice(data, config, format, true);
+    }
+
     if (!cancelled) {
       let message: string;
       if (err instanceof Error) {
@@ -108,16 +177,6 @@ async function handleSlice(
       }
       self.postMessage({ type: 'error', message });
     }
-  } finally {
-    // Clean up the engine instance to free C++ memory
-    if (engine) {
-      try {
-        engine.destroy();
-      } catch {
-        // Ignore cleanup errors
-      }
-      engine = null;
-    }
   }
 }
 
@@ -125,13 +184,18 @@ async function handleSlicePlate(
   objects: PlateObjectMsg[],
   globalConfig: Record<string, string>,
   printSequence?: string,
+  wasm64 = false,
 ): Promise<void> {
   cancelled = false;
+  // Destroy any previous engine before creating a new one
+  destroyEngine();
+
+  const variantLabel = wasm64 ? 'WASM64' : 'WASM';
 
   try {
     // Load the WASM module
-    sendProgress('loading', 0);
-    engine = await createSlicerEngine();
+    sendProgress('loading', 0, `Loading ${variantLabel} slicer engine...`);
+    engine = await createSlicerEngine(wasm64);
     if (cancelled) return;
     sendProgress('loading', 1);
 
@@ -158,6 +222,13 @@ async function handleSlicePlate(
       // Apply per-object config overrides if present
       if (obj.config && Object.keys(obj.config).length > 0) {
         engine.setObjectConfig(objectIndex, obj.config);
+      }
+
+      // Apply per-volume extruder assignments (multicolor 3MF objects)
+      if (obj.volumeExtruders) {
+        for (const [volIdx, extruder] of Object.entries(obj.volumeExtruders)) {
+          engine.setVolumeExtruder(objectIndex, Number(volIdx), extruder);
+        }
       }
     }
     if (cancelled) return;
@@ -191,9 +262,24 @@ async function handleSlicePlate(
 
     if (cancelled) return;
 
+    // Get native stats + resolved configs from C++ (if available)
+    // Engine stays alive so getResolvedConfigs can be called later
+    const { nativeStats, resolvedConfigs } = getEngineResults(engine);
+
     const stats = parseGcodeStats(gcode);
-    self.postMessage({ type: 'done', gcode, stats });
+    const engineName = wasm64 ? 'WASM64' : 'WASM';
+    self.postMessage({ type: 'done', gcode, stats, nativeStats, resolvedConfigs, engineName });
   } catch (err) {
+    // Destroy engine on error — no useful state to query
+    destroyEngine();
+
+    // OOM retry: if wasm32 ran out of memory, retry with wasm64 (if supported)
+    if (!wasm64 && !cancelled && isOomError(err) && supportsMemory64()) {
+      console.warn('[slicer-worker] wasm32 OOM on plate slice — retrying with wasm64...');
+      sendProgress('loading', 0, 'Out of memory — retrying with WASM64 (larger address space)...');
+      return handleSlicePlate(objects, globalConfig, printSequence, true);
+    }
+
     if (!cancelled) {
       let message: string;
       if (err instanceof Error) {
@@ -205,15 +291,6 @@ async function handleSlicePlate(
       }
       self.postMessage({ type: 'error', message });
     }
-  } finally {
-    if (engine) {
-      try {
-        engine.destroy();
-      } catch {
-        // Ignore cleanup errors
-      }
-      engine = null;
-    }
   }
 }
 
@@ -222,9 +299,24 @@ self.onmessage = (e: MessageEvent) => {
 
   if (msg.type === 'cancel') {
     cancelled = true;
-    // Note: WASM slicing is not interruptible — this flag prevents
-    // sending further progress/done messages after the current operation
-    // completes. The engine is destroyed in the finally block.
+    // Destroy the engine on cancel — no useful state to query
+    destroyEngine();
+    return;
+  }
+
+  if (msg.type === 'getResolvedConfigs') {
+    // Query resolved config values from the last slice's engine
+    if (!engine) {
+      self.postMessage({ type: 'resolvedConfigs', configs: {} });
+      return;
+    }
+    try {
+      const configs = engine.getResolvedConfigs(msg.keys || AUTO_RESOLVE_KEYS);
+      self.postMessage({ type: 'resolvedConfigs', configs });
+    } catch (err) {
+      console.warn('[slicer-worker] getResolvedConfigs failed:', err);
+      self.postMessage({ type: 'resolvedConfigs', configs: {} });
+    }
     return;
   }
 

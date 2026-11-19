@@ -12,13 +12,18 @@ export interface BuildPlateFlushVolumesProps {
 
 /**
  * Compute the number of extruders in use on the plate.
- * Returns at least 2 when any multicolor object exists (otherwise flush UI is irrelevant).
+ * Accounts for per-volume extruder assignments (multicolor 3MF objects)
+ * and per-object extruder assignments (single-color objects).
  */
 export function getPlateExtruderCount(objects: BuildPlateObject[]): number {
   let maxExtruder = 0;
   for (const obj of objects) {
     if (obj.colorGroups && obj.colorGroups.length > 1) {
-      maxExtruder = Math.max(maxExtruder, obj.colorGroups.length - 1);
+      // Check per-volume assignments, falling back to identity mapping
+      for (let i = 0; i < obj.colorGroups.length; i++) {
+        const extruder = obj.volumeExtruders?.[i] ?? i;
+        maxExtruder = Math.max(maxExtruder, extruder);
+      }
     }
     if (obj.extruderAssignment !== undefined) {
       maxExtruder = Math.max(maxExtruder, obj.extruderAssignment);
@@ -77,9 +82,6 @@ export function BuildPlateFlushVolumes({
     () => getPlateExtruderCount(objects),
     [objects],
   );
-
-  // Only show when multiple extruders are in use
-  if (plateExtruderCount < 2) return null;
 
   // Ensure matrix is sized for current extruder count
   const effectiveConfig = useMemo((): FlushVolumeConfig => {
@@ -141,6 +143,9 @@ export function BuildPlateFlushVolumes({
     }
     return labels;
   }, [objects, extruderCount]);
+
+  // Only show when multiple extruders are in use (after all hooks)
+  if (plateExtruderCount < 2) return null;
 
   return (
     <div className="build-plate-flush-volumes">

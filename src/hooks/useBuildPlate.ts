@@ -156,6 +156,7 @@ export interface UseBuildPlateResult {
   updateObjectOverrides: (id: string, overrides: Partial<PrintProfile>) => void;
   clearObjectOverrides: (id: string) => void;
   setExtruderAssignment: (id: string, extruder: number) => void;
+  setVolumeExtruder: (id: string, volumeIndex: number, extruder: number) => void;
   replaceObjectMesh: (
     id: string,
     meshData: ArrayBuffer,
@@ -590,6 +591,18 @@ export function useBuildPlate(
     );
   }, [pushUndo]);
 
+  const setVolumeExtruder = useCallback((id: string, volumeIndex: number, extruder: number) => {
+    pushUndo();
+    setObjects((prev) =>
+      prev.map((o) => {
+        if (o.id !== id) return o;
+        const volumeExtruders = { ...(o.volumeExtruders ?? {}) };
+        volumeExtruders[volumeIndex] = extruder;
+        return { ...o, volumeExtruders };
+      }),
+    );
+  }, [pushUndo]);
+
   const replaceObjectMesh = useCallback(
     (
       id: string,
@@ -739,6 +752,7 @@ export function useBuildPlate(
     updateObjectOverrides,
     clearObjectOverrides,
     setExtruderAssignment,
+    setVolumeExtruder,
     replaceObjectMesh,
 
     mirrorObject,

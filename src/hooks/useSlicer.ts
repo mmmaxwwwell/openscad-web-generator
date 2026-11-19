@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createSlicerBackend } from '../lib/slicer-backend';
 import type { SlicerBackend } from '../lib/slicer-backend';
 import type { PlateObjectMsg } from '../workers/slicer-worker';
+import type { SliceStats } from '../types/print-profile';
 
 export type SlicerStatus = 'idle' | 'loading' | 'ready' | 'slicing' | 'error';
 
@@ -22,10 +23,16 @@ export interface SliceProgress {
 
 export interface SliceResult {
   gcode: string;
-  /** Estimated print time in seconds */
+  /** Estimated print time in seconds (from GCode parsing or native stats) */
   printTime?: number;
   /** Filament used in mm (parsed from gcode comments) */
   filamentUsed?: number;
+  /** Rich print statistics from the slicer engine (available when using native stats API) */
+  stats?: SliceStats;
+  /** Resolved slicer config values for "auto" fields (available after slicing) */
+  resolvedConfigs?: Record<string, string>;
+  /** Engine name reported by the worker (e.g. "WASM", "WASM64") — may differ from backend default if OOM retry occurred */
+  engineName?: string;
 }
 
 export interface UseSlicerResult {
@@ -39,6 +46,10 @@ export interface UseSlicerResult {
   debugLog: string[];
   /** Human-readable engine name (e.g. "WASM", "Native ARM") */
   engineName: string;
+  /** Rich print statistics from the most recent slice (null before first slice) */
+  sliceStats: SliceStats | null;
+  /** Resolved slicer config values for "auto" fields from the most recent slice */
+  resolvedConfigs: Record<string, string> | null;
   /**
    * Slice an STL buffer into GCode.
    * @param stlData - Binary STL data as ArrayBuffer (used for single-color)
@@ -61,6 +72,8 @@ export interface UseSlicerResult {
     globalConfig: Record<string, string>,
     printSequence?: string,
   ) => Promise<SliceResult>;
+  /** Query resolved config values from the engine without re-slicing */
+  queryResolvedConfigs: (keys: string[]) => Promise<Record<string, string>>;
   /** Cancel an in-flight slicing operation */
   cancel: () => void;
   /** Reset the slicer (clears error state, creates fresh engine on next slice) */
@@ -114,6 +127,8 @@ export function useSlicer(): UseSlicerResult {
   const [progress, setProgress] = useState<SliceProgress | null>(null);
   const [debugLog, setDebugLog] = useState<string[]>([]);
   const [engineName, setEngineName] = useState<string>('WASM');
+  const [sliceStats, setSliceStats] = useState<SliceStats | null>(null);
+  const [resolvedConfigs, setResolvedConfigs] = useState<Record<string, string> | null>(null);
 
   const mountedRef = useRef(true);
   const backendRef = useRef<SlicerBackend | null>(null);
@@ -194,6 +209,9 @@ export function useSlicer(): UseSlicerResult {
         if (!mountedRef.current) return;
         setStatus('ready');
         setProgress(null);
+        if (result.stats) setSliceStats(result.stats);
+        if (result.resolvedConfigs) setResolvedConfigs(result.resolvedConfigs);
+        if (result.engineName) setEngineName(result.engineName);
         pendingRef.current = null;
         resolve(result);
       }).catch(err => {
@@ -249,6 +267,9 @@ export function useSlicer(): UseSlicerResult {
         if (!mountedRef.current) return;
         setStatus('ready');
         setProgress(null);
+        if (result.stats) setSliceStats(result.stats);
+        if (result.resolvedConfigs) setResolvedConfigs(result.resolvedConfigs);
+        if (result.engineName) setEngineName(result.engineName);
         pendingRef.current = null;
         resolve(result);
       }).catch(err => {
@@ -278,6 +299,16 @@ export function useSlicer(): UseSlicerResult {
     }
   }, []);
 
+  const queryResolvedConfigs = useCallback(async (keys: string[]): Promise<Record<string, string>> => {
+    const backend = backendRef.current;
+    if (!backend) return {};
+    const configs = await backend.getResolvedConfigs(keys);
+    if (mountedRef.current) {
+      setResolvedConfigs(prev => prev ? { ...prev, ...configs } : configs);
+    }
+    return configs;
+  }, []);
+
   const reset = useCallback(() => {
     // Destroy the current backend so a fresh one is created on next slice
     if (backendRef.current) {
@@ -292,7 +323,13 @@ export function useSlicer(): UseSlicerResult {
     setError(null);
     setProgress(null);
     setDebugLog([]);
+    setSliceStats(null);
+    setResolvedConfigs(null);
   }, []);
 
-  return { status, error, progress, debugLog, engineName, slice, slicePlate, cancel, reset };
+  return {
+    status, error, progress, debugLog, engineName,
+    sliceStats, resolvedConfigs,
+    slice, slicePlate, queryResolvedConfigs, cancel, reset,
+  };
 }

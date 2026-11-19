@@ -10,6 +10,7 @@
     "build:wasm": "node scripts/download-wasm.mjs",
     "build:wasm:source": "node scripts/build-wasm.mjs",
     "build:bosl2": "node scripts/bundle-bosl2.mjs",
+    "build:wasm:slicer": "nix develop -c node scripts/build-slicer-wasm.mjs --force",
     "preview": "vite preview",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

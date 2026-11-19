@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 import { useState } from 'react';
 import type { PrintProfile } from '../../types/print-profile';
-import { createOverrideHelpers } from './override-helpers';
+import { createOverrideHelpers, PerObjectWarning } from './override-helpers';
 
 export interface PrintSettingsTabProps {
   profile: PrintProfile;
@@ -10,6 +10,12 @@ export interface PrintSettingsTabProps {
   overrides?: Partial<PrintProfile>;
   /** Reset a single field's override back to plate default */
   onResetField?: (field: keyof PrintProfile) => void;
+  /** Pre-slice auto value approximations (keyed by PrintProfile field name) */
+  autoValues?: Record<string, number>;
+  /** Post-slice resolved config values from WASM engine (keyed by OrcaSlicer config key name) */
+  resolvedConfigs?: Record<string, string>;
+  /** Set of PrintProfile field names that have per-object overrides (for plate settings warning indicators) */
+  perObjectOverrides?: Set<keyof PrintProfile>;
 }
 
 const SEAM_POSITIONS: Array<{ value: PrintProfile['seamPosition']; label: string }> = [
@@ -26,6 +32,18 @@ const SEAM_SCARF_TYPES: Array<{ value: PrintProfile['seamScarfType']; label: str
   { value: 'all', label: 'All' },
 ];
 
+/** Maps PrintProfile line width field names to OrcaSlicer config key names */
+const LINE_WIDTH_CONFIG_KEYS: Record<string, string> = {
+  lineWidth: 'line_width',
+  outerWallLineWidth: 'outer_wall_line_width',
+  innerWallLineWidth: 'inner_wall_line_width',
+  topSurfaceLineWidth: 'top_surface_line_width',
+  internalSolidInfillLineWidth: 'internal_solid_infill_line_width',
+  sparseInfillLineWidth: 'sparse_infill_line_width',
+  supportLineWidth: 'support_line_width',
+  initialLayerLineWidth: 'initial_layer_line_width',
+};
+
 interface LineWidthFieldProps {
   label: string;
   value: number;
@@ -34,22 +52,26 @@ interface LineWidthFieldProps {
   onChange: (updates: Partial<PrintProfile>) => void;
   overrideClass?: string;
   resetBtnEl?: React.ReactElement | null;
+  /** Post-slice resolved value from WASM engine (takes priority over autoValue) */
+  resolvedValue?: number;
 }
 
-function LineWidthField({ label, value, fieldKey, onChange, overrideClass, resetBtnEl, autoValue = 0.4 }: LineWidthFieldProps) {
+function LineWidthField({ label, value, fieldKey, onChange, overrideClass, resetBtnEl, autoValue = 0.4, resolvedValue }: LineWidthFieldProps) {
   const isAuto = value === 0;
+  const displayValue = resolvedValue ?? autoValue;
+  const isResolved = resolvedValue !== undefined;
   return (
     <label className={`print-dialog-field${overrideClass || ''}`}>
       <span>{label} {isAuto ? '(auto)' : `(${value} mm)`} {resetBtnEl}</span>
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
         <input
           type="number"
-          value={isAuto ? autoValue : value}
+          value={isAuto ? displayValue : value}
           disabled={isAuto}
           step={0.01}
           min={0.05}
           max={2.0}
-          style={{ flex: 1, opacity: isAuto ? 0.5 : 1 }}
+          style={{ flex: 1, opacity: isAuto ? 0.5 : 1, fontStyle: isAuto ? 'italic' : undefined }}
           onChange={(e) => {
             const val = e.target.value === '' ? 0 : Number(e.target.value);
             onChange({ [fieldKey]: val } as Partial<PrintProfile>);
@@ -60,30 +82,53 @@ function LineWidthField({ label, value, fieldKey, onChange, overrideClass, reset
             type="checkbox"
             checked={isAuto}
             onChange={(e) => {
-              onChange({ [fieldKey]: e.target.checked ? 0 : autoValue } as Partial<PrintProfile>);
+              onChange({ [fieldKey]: e.target.checked ? 0 : displayValue } as Partial<PrintProfile>);
             }}
           />
           Auto
+          {isAuto && (
+            <span style={{ fontSize: '0.8em', opacity: 0.6, marginLeft: '0.15rem' }}>
+              {isResolved ? '(resolved)' : '(est.)'}
+            </span>
+          )}
         </label>
       </div>
     </label>
   );
 }
 
-export function QualityTab({ profile, onChange, overrides, onResetField }: PrintSettingsTabProps) {
+export function QualityTab({ profile, onChange, overrides, onResetField, autoValues, resolvedConfigs, perObjectOverrides }: PrintSettingsTabProps) {
   const { oc, resetBtn } = createOverrideHelpers(overrides, onResetField);
   const [scarfOpen, setScarfOpen] = useState(false);
+
+  /** Get the resolved value for a line width field, if available from post-slice data */
+  const getResolvedLineWidth = (fieldKey: string): number | undefined => {
+    const configKey = LINE_WIDTH_CONFIG_KEYS[fieldKey];
+    if (configKey && resolvedConfigs?.[configKey]) {
+      const v = parseFloat(resolvedConfigs[configKey]);
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return undefined;
+  };
+
+  /** Get the auto value for a line width field from pre-slice approximation */
+  const getAutoLineWidth = (fieldKey: string): number | undefined => {
+    if (autoValues?.[fieldKey] !== undefined && autoValues[fieldKey] > 0) {
+      return autoValues[fieldKey];
+    }
+    return undefined;
+  };
 
   return (
     <>
       {/* Layer heights */}
       <label className={`print-dialog-field${oc('layerHeight')}`}>
-        <span>Layer Height ({profile.layerHeight} mm) {resetBtn('layerHeight')}</span>
-        <input type="range" value={profile.layerHeight} step={0.05} min={0.05} max={0.6}
+        <span>Layer Height (mm) {resetBtn('layerHeight')} <PerObjectWarning field="layerHeight" perObjectOverrides={perObjectOverrides} /></span>
+        <input type="number" value={profile.layerHeight} step={0.05} min={0.05} max={0.6}
           onChange={(e) => onChange({ layerHeight: Number(e.target.value) })} />
       </label>
       <label className={`print-dialog-field${oc('initialLayerPrintHeight')}`}>
-        <span>First Layer Height (mm) {resetBtn('initialLayerPrintHeight')}</span>
+        <span>First Layer Height (mm) {resetBtn('initialLayerPrintHeight')} <PerObjectWarning field="initialLayerPrintHeight" perObjectOverrides={perObjectOverrides} /></span>
         <input type="number" value={profile.initialLayerPrintHeight} step={0.05} min={0.1} max={0.6}
           onChange={(e) => onChange({ initialLayerPrintHeight: Number(e.target.value) })} />
       </label>
@@ -100,14 +145,14 @@ export function QualityTab({ profile, onChange, overrides, onResetField }: Print
 
       {/* Line widths */}
       <h4 style={{ margin: '0.75rem 0 0.25rem' }}>Line Widths</h4>
-      <LineWidthField label="Default" value={profile.lineWidth} fieldKey="lineWidth" onChange={onChange} overrideClass={oc('lineWidth')} resetBtnEl={resetBtn('lineWidth')} />
-      <LineWidthField label="Outer Wall" value={profile.outerWallLineWidth} fieldKey="outerWallLineWidth" onChange={onChange} overrideClass={oc('outerWallLineWidth')} resetBtnEl={resetBtn('outerWallLineWidth')} />
-      <LineWidthField label="Inner Wall" value={profile.innerWallLineWidth} fieldKey="innerWallLineWidth" onChange={onChange} overrideClass={oc('innerWallLineWidth')} resetBtnEl={resetBtn('innerWallLineWidth')} />
-      <LineWidthField label="Top Surface" value={profile.topSurfaceLineWidth} fieldKey="topSurfaceLineWidth" onChange={onChange} overrideClass={oc('topSurfaceLineWidth')} resetBtnEl={resetBtn('topSurfaceLineWidth')} />
-      <LineWidthField label="Internal Solid Infill" value={profile.internalSolidInfillLineWidth} fieldKey="internalSolidInfillLineWidth" onChange={onChange} overrideClass={oc('internalSolidInfillLineWidth')} resetBtnEl={resetBtn('internalSolidInfillLineWidth')} />
-      <LineWidthField label="Sparse Infill" value={profile.sparseInfillLineWidth} fieldKey="sparseInfillLineWidth" onChange={onChange} overrideClass={oc('sparseInfillLineWidth')} resetBtnEl={resetBtn('sparseInfillLineWidth')} />
-      <LineWidthField label="Support" value={profile.supportLineWidth} fieldKey="supportLineWidth" onChange={onChange} overrideClass={oc('supportLineWidth')} resetBtnEl={resetBtn('supportLineWidth')} />
-      <LineWidthField label="Initial Layer" value={profile.initialLayerLineWidth} fieldKey="initialLayerLineWidth" onChange={onChange} overrideClass={oc('initialLayerLineWidth')} resetBtnEl={resetBtn('initialLayerLineWidth')} />
+      <LineWidthField label="Default" value={profile.lineWidth} fieldKey="lineWidth" onChange={onChange} overrideClass={oc('lineWidth')} resetBtnEl={resetBtn('lineWidth')} autoValue={getAutoLineWidth('lineWidth')} resolvedValue={getResolvedLineWidth('lineWidth')} />
+      <LineWidthField label="Outer Wall" value={profile.outerWallLineWidth} fieldKey="outerWallLineWidth" onChange={onChange} overrideClass={oc('outerWallLineWidth')} resetBtnEl={resetBtn('outerWallLineWidth')} autoValue={getAutoLineWidth('outerWallLineWidth')} resolvedValue={getResolvedLineWidth('outerWallLineWidth')} />
+      <LineWidthField label="Inner Wall" value={profile.innerWallLineWidth} fieldKey="innerWallLineWidth" onChange={onChange} overrideClass={oc('innerWallLineWidth')} resetBtnEl={resetBtn('innerWallLineWidth')} autoValue={getAutoLineWidth('innerWallLineWidth')} resolvedValue={getResolvedLineWidth('innerWallLineWidth')} />
+      <LineWidthField label="Top Surface" value={profile.topSurfaceLineWidth} fieldKey="topSurfaceLineWidth" onChange={onChange} overrideClass={oc('topSurfaceLineWidth')} resetBtnEl={resetBtn('topSurfaceLineWidth')} autoValue={getAutoLineWidth('topSurfaceLineWidth')} resolvedValue={getResolvedLineWidth('topSurfaceLineWidth')} />
+      <LineWidthField label="Internal Solid Infill" value={profile.internalSolidInfillLineWidth} fieldKey="internalSolidInfillLineWidth" onChange={onChange} overrideClass={oc('internalSolidInfillLineWidth')} resetBtnEl={resetBtn('internalSolidInfillLineWidth')} autoValue={getAutoLineWidth('internalSolidInfillLineWidth')} resolvedValue={getResolvedLineWidth('internalSolidInfillLineWidth')} />
+      <LineWidthField label="Sparse Infill" value={profile.sparseInfillLineWidth} fieldKey="sparseInfillLineWidth" onChange={onChange} overrideClass={oc('sparseInfillLineWidth')} resetBtnEl={resetBtn('sparseInfillLineWidth')} autoValue={getAutoLineWidth('sparseInfillLineWidth')} resolvedValue={getResolvedLineWidth('sparseInfillLineWidth')} />
+      <LineWidthField label="Support" value={profile.supportLineWidth} fieldKey="supportLineWidth" onChange={onChange} overrideClass={oc('supportLineWidth')} resetBtnEl={resetBtn('supportLineWidth')} autoValue={getAutoLineWidth('supportLineWidth')} resolvedValue={getResolvedLineWidth('supportLineWidth')} />
+      <LineWidthField label="Initial Layer" value={profile.initialLayerLineWidth} fieldKey="initialLayerLineWidth" onChange={onChange} overrideClass={oc('initialLayerLineWidth')} resetBtnEl={resetBtn('initialLayerLineWidth')} autoValue={getAutoLineWidth('initialLayerLineWidth')} resolvedValue={getResolvedLineWidth('initialLayerLineWidth')} />
 
       {/* Seam */}
       <h4 style={{ margin: '0.75rem 0 0.25rem' }}>Seam</h4>

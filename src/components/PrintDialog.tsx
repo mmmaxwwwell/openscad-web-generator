@@ -10,7 +10,7 @@ import type { ColorGroup } from '../lib/merge-3mf';
 import type { PrintProfile } from '../types/print-profile';
 import { DEFAULT_PRINT_PROFILE } from '../types/print-profile';
 import { getPrinterProfile, getNozzleProfile } from '../data/printer-profiles';
-import { buildOrcaConfig, type PrinterSettings } from '../lib/orca-slicer-settings';
+import { buildOrcaConfig, getAutoValues, type PrinterSettings } from '../lib/orca-slicer-settings';
 import type { PrinterStructureType, NozzleType } from '../lib/slicer-settings';
 import type { ScadSlicerSettings } from '../lib/scad-parser';
 import type { ParsedGCode } from '../lib/gcode-parser';
@@ -48,6 +48,14 @@ const DEFAULT_PRINTER_SETTINGS: PrinterSettings = {
   chamberTempControl: false,
   maxVolumetricSpeed: 0,
 };
+
+/** Get the CSS modifier class for the engine badge based on engine name */
+function engineBadgeClass(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.includes('native')) return 'print-dialog-engine-badge--native';
+  if (lower.includes('wasm64')) return 'print-dialog-engine-badge--wasm64';
+  return 'print-dialog-engine-badge--wasm';
+}
 
 /** Build PrinterSettings from a printer profile, falling back to generic defaults */
 function printerSettingsFromProfile(profileId?: string): PrinterSettings {
@@ -310,6 +318,12 @@ export function PrintDialog({
     [getResolvedFilament, printer.address, primaryFilament],
   );
 
+  // Pre-slice approximation of auto-resolved values (line widths, speeds, etc.)
+  const autoValues = useMemo(
+    () => getAutoValues(printerConfig?.nozzleDiameter ?? 0.4, profile.retractionSpeed),
+    [printerConfig?.nozzleDiameter, profile.retractionSpeed],
+  );
+
   // Apply printer config when it arrives
   useEffect(() => {
     if (!printerConfig) return;
@@ -465,6 +479,7 @@ export function PrintDialog({
               ? colorGroups.map((cg) => cg.colorHex.slice(0, 7))
               : undefined
           }
+          sliceStats={sliceResult?.stats}
           onBack={() => setPhase('done')}
         />
       </div>
@@ -484,7 +499,7 @@ export function PrintDialog({
             {printerConfig && ` (${printerConfig.bedWidth}x${printerConfig.bedDepth}mm${printerConfig.originCenter ? ', center origin' : ''})`}
           </span>
           {engineName && (
-            <span className={`print-dialog-engine-badge ${engineName.toLowerCase().includes('native') ? 'print-dialog-engine-badge--native' : 'print-dialog-engine-badge--wasm'}`}>
+            <span className={`print-dialog-engine-badge ${engineBadgeClass(engineName)}`}>
               {engineName}
             </span>
           )}
@@ -771,7 +786,7 @@ export function PrintDialog({
               )}
 
               {activeSection === 'quality' && (
-                <QualityTab profile={profile} onChange={handleProfileChange} />
+                <QualityTab profile={profile} onChange={handleProfileChange} autoValues={autoValues} resolvedConfigs={sliceResult?.resolvedConfigs} />
               )}
 
               {activeSection === 'walls' && (
@@ -779,7 +794,7 @@ export function PrintDialog({
               )}
 
               {activeSection === 'infill' && (
-                <InfillTab profile={profile} onChange={handleProfileChange} />
+                <InfillTab profile={profile} onChange={handleProfileChange} autoValues={autoValues} resolvedConfigs={sliceResult?.resolvedConfigs} />
               )}
 
               {activeSection === 'speed' && (
@@ -794,7 +809,7 @@ export function PrintDialog({
                     <input type="number" value={resolved.printSpeed} min={5} max={printerConfig?.maxVelocity ?? 500}
                       onChange={(e) => updateFilamentField('printSpeed', Number(e.target.value))} />
                   </label>
-                  <SpeedTab profile={profile} onChange={handleProfileChange} maxVelocity={printerConfig?.maxVelocity} />
+                  <SpeedTab profile={profile} onChange={handleProfileChange} maxVelocity={printerConfig?.maxVelocity} autoValues={autoValues} resolvedConfigs={sliceResult?.resolvedConfigs} />
                 </>
               )}
 
@@ -844,7 +859,7 @@ export function PrintDialog({
               )}
 
               {activeSection === 'support' && (
-                <SupportTab profile={profile} onChange={handleProfileChange} />
+                <SupportTab profile={profile} onChange={handleProfileChange} autoValues={autoValues} resolvedConfigs={sliceResult?.resolvedConfigs} />
               )}
 
               {activeSection === 'adhesion' && (
@@ -894,7 +909,7 @@ export function PrintDialog({
         {phase === 'slicing' && (
           <div className="print-dialog-progress">
             {engineName && (
-              <span className={`print-dialog-engine-badge ${engineName.toLowerCase().includes('native') ? 'print-dialog-engine-badge--native' : 'print-dialog-engine-badge--wasm'}`}>
+              <span className={`print-dialog-engine-badge ${engineBadgeClass(engineName)}`}>
                 Slicing with {engineName}
               </span>
             )}
@@ -951,6 +966,7 @@ export function PrintDialog({
                       ? colorGroups.map((cg) => cg.colorHex.slice(0, 7))
                       : undefined
                   }
+                  sliceStats={sliceResult?.stats}
                 />
                 <button
                   className="print-dialog-fullscreen-btn"
@@ -972,14 +988,81 @@ export function PrintDialog({
               </div>
             )}
 
-            <div className="print-dialog-done-info">
-              {sliceResult.printTime && (
-                <span>Time: {formatTime(sliceResult.printTime)}</span>
-              )}
-              {sliceResult.filamentUsed && (
-                <span>Filament: {(sliceResult.filamentUsed / 1000).toFixed(1)}m</span>
-              )}
-            </div>
+            {sliceResult.stats ? (
+              <div className="print-dialog-stats-panel">
+                <div className="print-dialog-stats-grid">
+                  {sliceResult.stats.printTimeStr && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Print Time</span>
+                      <span className="print-dialog-stat-value">{sliceResult.stats.printTimeStr}</span>
+                    </div>
+                  )}
+                  {sliceResult.stats.totalFilamentG > 0 && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Filament</span>
+                      <span className="print-dialog-stat-value">
+                        {sliceResult.stats.totalFilamentG.toFixed(1)}g
+                        {sliceResult.stats.totalFilamentMm3 > 0 && (
+                          <span className="print-dialog-stat-secondary">
+                            {' '}({(sliceResult.stats.totalFilamentMm3 / 1000).toFixed(1)}cm&sup3;)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {sliceResult.stats.layerCount > 0 && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Layers</span>
+                      <span className="print-dialog-stat-value">
+                        {sliceResult.stats.layerCount}
+                        {sliceResult.stats.supportLayerCount > 0 && (
+                          <span className="print-dialog-stat-secondary">
+                            {' '}(+{sliceResult.stats.supportLayerCount} support)
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {sliceResult.stats.totalCost > 0 && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Cost</span>
+                      <span className="print-dialog-stat-value">${sliceResult.stats.totalCost.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {sliceResult.stats.totalToolchanges > 0 && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Tool Changes</span>
+                      <span className="print-dialog-stat-value">{sliceResult.stats.totalToolchanges}</span>
+                    </div>
+                  )}
+                  {sliceResult.stats.wipeTowerFilament > 0 && (
+                    <div className="print-dialog-stat">
+                      <span className="print-dialog-stat-label">Wipe Tower</span>
+                      <span className="print-dialog-stat-value">{sliceResult.stats.wipeTowerFilament.toFixed(1)}g</span>
+                    </div>
+                  )}
+                  {Object.keys(sliceResult.stats.perExtruderFilament).length > 1 && (
+                    <>
+                      {Object.entries(sliceResult.stats.perExtruderFilament).map(([idx, grams]) => (
+                        <div className="print-dialog-stat" key={idx}>
+                          <span className="print-dialog-stat-label">Extruder {Number(idx) + 1}</span>
+                          <span className="print-dialog-stat-value">{grams.toFixed(1)}g</span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="print-dialog-done-info">
+                {sliceResult.printTime && (
+                  <span>Time: {formatTime(sliceResult.printTime)}</span>
+                )}
+                {sliceResult.filamentUsed && (
+                  <span>Filament: {(sliceResult.filamentUsed / 1000).toFixed(1)}m</span>
+                )}
+              </div>
+            )}
             <div className="print-dialog-done-actions">
               <button
                 className="print-dialog-start-btn"

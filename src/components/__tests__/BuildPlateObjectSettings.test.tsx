@@ -35,6 +35,7 @@ function makeProps(overrides: Partial<BuildPlateObjectSettingsProps> = {}): Buil
     onResetField: vi.fn(),
     onUpdateTransform: vi.fn(),
     onSetExtruder: vi.fn(),
+    onSetVolumeExtruder: vi.fn(),
     ...overrides,
   };
 }
@@ -159,54 +160,73 @@ describe('BuildPlateObjectSettings', () => {
   // ── Extruder assignment ────────────────────────────────────────────────
 
   describe('extruder assignment', () => {
-    it('shows extruder dropdown for multicolor objects', () => {
+    it('shows per-volume extruder dropdowns for multicolor objects', () => {
       renderSettings({
         object: makeObject({
           colorGroups: [{ color: '#FF0000' }, { color: '#00FF00' }],
         }),
       });
-      expect(screen.getByText('Extruder Assignment')).toBeTruthy();
-      expect(screen.getByText(/Extruder 1/)).toBeTruthy();
-      expect(screen.getByText(/Extruder 2/)).toBeTruthy();
+      expect(screen.getByText('Color → Extruder')).toBeTruthy();
+      expect(screen.getByText('Color 1')).toBeTruthy();
+      expect(screen.getByText('Color 2')).toBeTruthy();
     });
 
     it('does not show extruder dropdown for single-color objects', () => {
       renderSettings({
         object: makeObject({ colorGroups: undefined }),
       });
+      expect(screen.queryByText('Color → Extruder')).toBeNull();
       expect(screen.queryByText('Extruder Assignment')).toBeNull();
     });
 
-    it('does not show extruder dropdown when onSetExtruder is not provided', () => {
+    it('does not show per-volume dropdown when onSetVolumeExtruder is not provided', () => {
       renderSettings({
         object: makeObject({
-          colorGroups: [{ color: '#FF0000' }],
+          colorGroups: [{ color: '#FF0000' }, { color: '#00FF00' }],
         }),
-        onSetExtruder: undefined,
+        onSetVolumeExtruder: undefined,
       });
-      expect(screen.queryByText('Extruder Assignment')).toBeNull();
+      // Falls back to single extruder dropdown when onSetVolumeExtruder not provided
+      expect(screen.queryByText('Color → Extruder')).toBeNull();
+      expect(screen.getByText('Extruder Assignment')).toBeTruthy();
     });
 
-    it('calls onSetExtruder when selection changes', () => {
+    it('calls onSetVolumeExtruder when per-volume selection changes', () => {
       const { props } = renderSettings({
         object: makeObject({
           colorGroups: [{ color: '#FF0000' }, { color: '#00FF00' }],
         }),
       });
-      const extruderSection = screen.getByText('Extruder Assignment').closest('.build-plate-extruder-section')!;
-      const select = within(extruderSection as HTMLElement).getByRole('combobox') as HTMLSelectElement;
-      fireEvent.change(select, { target: { value: '1' } });
-      expect(props.onSetExtruder).toHaveBeenCalledWith('obj-1', 1);
+      const extruderSection = screen.getByText('Color → Extruder').closest('.build-plate-extruder-section')!;
+      const selects = within(extruderSection as HTMLElement).getAllByRole('combobox');
+      // Change the second color's extruder
+      fireEvent.change(selects[1], { target: { value: '2' } });
+      expect(props.onSetVolumeExtruder).toHaveBeenCalledWith('obj-1', 1, 2);
     });
 
-    it('displays color in extruder options', () => {
-      renderSettings({
+    it('shows color swatches for each volume', () => {
+      const { container } = renderSettings({
         object: makeObject({
           colorGroups: [{ color: '#FF0000' }, { color: '#00FF00' }],
         }),
       });
-      expect(screen.getByText('Extruder 1 (#FF0000)')).toBeTruthy();
-      expect(screen.getByText('Extruder 2 (#00FF00)')).toBeTruthy();
+      const swatches = container.querySelectorAll('.print-dialog-color-swatch');
+      expect(swatches).toHaveLength(2);
+      expect((swatches[0] as HTMLElement).style.backgroundColor).toBe('rgb(255, 0, 0)');
+      expect((swatches[1] as HTMLElement).style.backgroundColor).toBe('rgb(0, 255, 0)');
+    });
+
+    it('uses volumeExtruders mapping when available', () => {
+      renderSettings({
+        object: makeObject({
+          colorGroups: [{ color: '#FF0000' }, { color: '#00FF00' }],
+          volumeExtruders: { 0: 2, 1: 0 },
+        }),
+      });
+      const extruderSection = screen.getByText('Color → Extruder').closest('.build-plate-extruder-section')!;
+      const selects = within(extruderSection as HTMLElement).getAllByRole('combobox') as HTMLSelectElement[];
+      expect(selects[0].value).toBe('2');
+      expect(selects[1].value).toBe('0');
     });
   });
 

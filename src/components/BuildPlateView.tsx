@@ -98,6 +98,82 @@ function printerSettingsFromProfile(profileId?: string): PrinterSettings {
   };
 }
 
+// ── Tab → field mapping for per-object override detection ────────────────
+
+/** Fields that belong to each print settings tab. Used to show warning indicators. */
+const TAB_FIELDS: Record<string, Array<keyof PrintProfile>> = {
+  quality: [
+    'layerHeight', 'initialLayerPrintHeight', 'adaptiveLayerHeight', 'preciseZHeight',
+    'lineWidth', 'outerWallLineWidth', 'innerWallLineWidth', 'topSurfaceLineWidth',
+    'internalSolidInfillLineWidth', 'sparseInfillLineWidth', 'supportLineWidth',
+    'initialLayerLineWidth', 'seamPosition', 'seamGap', 'staggeredInnerSeams',
+    'seamScarfType', 'scarfSlopeConditional', 'scarfAngleThreshold',
+    'scarfOverhangThreshold', 'scarfJointSpeed', 'scarfJointFlowRatio',
+    'scarfStartHeight', 'scarfEntireLoop', 'scarfMinLength', 'scarfSteps', 'scarfInnerWalls',
+  ],
+  walls: [
+    'wallLoops', 'wallSequence', 'wallGenerator', 'wallDirection',
+    'ensureVerticalShellThickness', 'topLayers', 'bottomLayers',
+    'isInfillFirst', 'preciseOuterWall', 'detectThinWall', 'detectOverhangWall',
+    'onlyOneWallFirstLayer', 'onlyOneWallTop', 'extraPerimetersOnOverhangs',
+    'slowdownForCurledPerimeters', 'minBeadWidth', 'minFeatureSize',
+    'wallTransitionAngle', 'wallTransitionFilterDeviation',
+    'wallTransitionLength', 'wallDistributionCount',
+  ],
+  infill: [
+    'sparseInfillDensity', 'sparseInfillPattern', 'infillAngle', 'infillOverlap',
+    'infillCombination', 'topSurfacePattern', 'bottomSurfacePattern',
+    'internalSolidInfillPattern', 'bridgeFlow', 'internalBridgeFlow',
+    'bridgeDensity', 'internalBridgeDensity', 'bridgeAngle', 'internalBridgeAngle',
+  ],
+  speed: [
+    'outerWallSpeed', 'innerWallSpeed', 'topSurfaceSpeed',
+    'internalSolidInfillSpeed', 'sparseInfillSpeed', 'gapFillSpeed',
+    'supportSpeed', 'bridgeSpeed', 'internalBridgeSpeed',
+    'smallPerimeterSpeed', 'smallPerimeterThreshold',
+    'initialLayerSpeed', 'initialLayerInfillSpeed', 'initialLayerTravelSpeed',
+    'skirtSpeed', 'travelSpeed', 'enableOverhangSpeed',
+    'overhang1_4Speed', 'overhang2_4Speed', 'overhang3_4Speed', 'overhang4_4Speed',
+    'defaultAcceleration', 'outerWallAcceleration', 'innerWallAcceleration',
+    'topSurfaceAcceleration', 'bridgeAcceleration', 'sparseInfillAcceleration',
+    'internalSolidInfillAcceleration', 'initialLayerAcceleration', 'travelAcceleration',
+    'defaultJerk', 'outerWallJerk', 'innerWallJerk', 'topSurfaceJerk',
+    'infillJerk', 'travelJerk', 'initialLayerJerk',
+    'accelToDecelEnable', 'accelToDecelFactor',
+  ],
+  support: [
+    'supportEnabled', 'supportType', 'supportStyle', 'supportThresholdAngle',
+    'supportDensity', 'supportXYOffset', 'supportZGap',
+    'supportOnBuildPlateOnly', 'supportSpeed', 'supportLineWidth',
+    'supportBasePattern', 'supportInterfaceLayers', 'supportInterfaceBottomLayers',
+    'supportInterfacePattern', 'supportInterfaceSpacing', 'supportInterfaceSpeed',
+  ],
+  adhesion: [
+    'adhesionType', 'skirtCount', 'skirtDistance', 'skirtSpeed',
+    'brimWidth', 'brimType', 'brimEarsDetectionLength', 'brimEarsMaxAngle',
+    'raftLayers',
+  ],
+  advanced: [
+    'pressureAdvanceEnable', 'pressureAdvanceValue', 'adaptivePressureAdvance',
+    'adaptivePAModel', 'adaptivePAOverhangs', 'adaptivePABridges',
+    'arcFittingEnable', 'gcodeResolution', 'fuzzySkinType', 'fuzzySkinMode',
+    'fuzzySkinNoiseType', 'fuzzySkinThickness', 'fuzzySkinPointDistance',
+    'fuzzySkinFirstLayer', 'fuzzySkinScale', 'fuzzySkinOctaves', 'fuzzySkinPersistence',
+    'ironingType', 'ironingFlow', 'ironingSpacing', 'ironingSpeed', 'ironingAngle',
+    'holeToPolyhole', 'holeToPolyholeThreshold', 'holeToPoleholeTwisted',
+    'excludeObject', 'makeOverhangPrintable', 'makeOverhangPrintableAngle',
+    'makeOverhangPrintableHoleSize', 'maxVolumetricFlowSmoothingRate',
+    'maxVolumetricFlowSmoothingSegment', 'printFlowRatio', 'timelapseType',
+    'spiralMode', 'overhangReverse', 'overhangReverseThreshold', 'slowDownLayers',
+  ],
+};
+
+function hasTabOverrides(tab: string, overriddenFields: Set<keyof PrintProfile>): boolean {
+  const fields = TAB_FIELDS[tab];
+  if (!fields) return false;
+  return fields.some((f) => overriddenFields.has(f));
+}
+
 // ── Props ────────────────────────────────────────────────────────────────
 
 export interface PendingBuildPlateObject {
@@ -124,9 +200,9 @@ export interface BuildPlateViewProps {
   onPendingObjectConsumed?: () => void;
 }
 
-// ── Sidebar collapsible section IDs ──────────────────────────────────────
+// ── Sidebar view mode ────────────────────────────────────────────────────
 
-type CollapsibleSection = 'objects' | 'object-settings' | 'plate-settings';
+type SidebarMode = 'objects' | 'plate-settings';
 
 // ── Component ────────────────────────────────────────────────────────────
 
@@ -151,22 +227,14 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
     () => printerSettingsFromProfile(printer.profileId),
   );
 
-  const [collapsedSections, setCollapsedSections] = useState<Set<CollapsibleSection>>(new Set());
-  const toggleSection = useCallback((section: CollapsibleSection) => {
-    setCollapsedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(section)) next.delete(section);
-      else next.add(section);
-      return next;
-    });
-  }, []);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('objects');
   const [gridSnap, setGridSnap] = useState(false);
   const [scadRendering, setScadRendering] = useState(false);
   const [scadError, setScadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [reRenderParams, setReRenderParams] = useState<Record<string, ScadValue> | null>(null);
   const [reRendering, setReRendering] = useState(false);
-  const [plateSettingsTab, setPlateSettingsTab] = useState<string>('quality');
+  const [plateSettingsTab, setPlateSettingsTab] = useState<string>('plate');
   const [reRenderError, setReRenderError] = useState<string | null>(null);
   const [showArrayCopy, setShowArrayCopy] = useState(false);
   const [arrayCopyRows, setArrayCopyRows] = useState(2);
@@ -187,6 +255,8 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
   const previewWorkerRef = useRef<Worker | null>(null);
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [showWasmWarning, setShowWasmWarning] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ objectId: string; x: number; y: number } | null>(null);
 
   // ── Apply printer config from Moonraker when it arrives ────────────
   useEffect(() => {
@@ -433,6 +503,14 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
     [plate],
   );
 
+  const handleObjectContextMenu = useCallback((objectId: string, x: number, y: number) => {
+    setContextMenu({ objectId, x, y });
+  }, []);
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
   const handleArrayCopy = useCallback(() => {
     if (!plate.selectedObjectId) return;
     plate.arrayCopyObject(
@@ -459,15 +537,8 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
     (id: string | null) => {
       plate.selectObject(id);
       if (id) {
-        // Expand object-settings section when selecting an object
-        setCollapsedSections((prev) => {
-          if (prev.has('object-settings')) {
-            const next = new Set(prev);
-            next.delete('object-settings');
-            return next;
-          }
-          return prev;
-        });
+        // Switch to objects view when selecting an object
+        setSidebarMode('objects');
       }
     },
     [plate],
@@ -579,8 +650,50 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
 
   // ── Slice plate ───────────────────────────────────────────────────
 
-  const handleSlicePlate = useCallback(async () => {
-    // 1. Validate
+  const doSlicePlate = useCallback(async () => {
+    const buildPlate = {
+      objects: plate.objects,
+      plateProfile: plate.plateProfile,
+      primeTower: plate.primeTower,
+      flushVolumeConfig: plate.flushVolumeConfig,
+      printSequence: plate.printSequence,
+      bedWidth,
+      bedDepth,
+      maxHeight,
+      originCenter,
+    };
+
+    // Build config
+    const job = buildPlateSliceConfig(
+      buildPlate,
+      resolvedFilament,
+      printerSettings,
+      printerConfig.config ?? null,
+      extruderCount,
+    );
+
+    // Clear previous result
+    setSliceResult(null);
+    setSliceError(null);
+    setParsedGCode(null);
+    setPreviewProgress(0);
+
+    // Slice
+    try {
+      const result = await slicer.slicePlate(
+        job.objects,
+        job.globalConfig,
+        job.printSequence,
+      );
+      setSliceResult(result);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSliceError(msg);
+    }
+  }, [plate, bedWidth, bedDepth, maxHeight, originCenter, resolvedFilament, printerSettings, printerConfig.config, extruderCount, slicer]);
+
+  const handleSlicePlate = useCallback(() => {
+    // Validate first
     const buildPlate = {
       objects: plate.objects,
       plateProfile: plate.plateProfile,
@@ -596,34 +709,14 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
     setValidationErrors(errors);
     if (errors.length > 0) return;
 
-    // 2. Build config
-    const job = buildPlateSliceConfig(
-      buildPlate,
-      resolvedFilament,
-      printerSettings,
-      printerConfig.config ?? null,
-      extruderCount,
-    );
-
-    // 3. Clear previous result
-    setSliceResult(null);
-    setSliceError(null);
-    setParsedGCode(null);
-    setPreviewProgress(0);
-
-    // 4. Slice
-    try {
-      const result = await slicer.slicePlate(
-        job.objects,
-        job.globalConfig,
-        job.printSequence,
-      );
-      setSliceResult(result);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSliceError(msg);
+    // Show WASM performance warning before slicing in browser
+    const isWasm = slicer.engineName === 'WASM' || slicer.engineName === 'WASM64';
+    if (isWasm) {
+      setShowWasmWarning(true);
+    } else {
+      void doSlicePlate();
     }
-  }, [plate, bedWidth, bedDepth, maxHeight, originCenter, resolvedFilament, printerSettings, printerConfig.config, extruderCount, slicer]);
+  }, [plate, bedWidth, bedDepth, maxHeight, originCenter, slicer.engineName, doSlicePlate]);
 
   // ── Parse GCode in worker after slice completes ────────────────────
 
@@ -771,6 +864,20 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
     return () => window.removeEventListener('keydown', handler);
   }, [plate.selectedObjectId, plate.selectedObject, showArrayCopy, handleSelectObject, handleDelete, handleDuplicate, plate]);
 
+  // ── Compute fields that have per-object overrides (for plate settings warning icons) ──
+
+  const fieldsWithObjectOverrides = useMemo(() => {
+    const fields = new Set<keyof PrintProfile>();
+    for (const obj of plate.objects) {
+      if (obj.printOverrides) {
+        for (const key of Object.keys(obj.printOverrides)) {
+          fields.add(key as keyof PrintProfile);
+        }
+      }
+    }
+    return fields;
+  }, [plate.objects]);
+
   // ── Loading state ────────────────────────────────────────────────────
 
   if (!plate.loaded) {
@@ -803,70 +910,73 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
         <div className="build-plate-body">
           {/* Left sidebar: objects + settings */}
           <div className="build-plate-sidebar">
-            {/* Objects section */}
-            <button
-              className="build-plate-section-toggle"
-              onClick={() => toggleSection('objects')}
-              aria-expanded={!collapsedSections.has('objects')}
-            >
-              <span className={`build-plate-section-arrow ${collapsedSections.has('objects') ? '' : 'build-plate-section-arrow--open'}`}>&#9654;</span>
-              <span>Objects ({plate.objects.length})</span>
-            </button>
-            {!collapsedSections.has('objects') && (
-              plate.objects.length === 0 ? (
-                <div className="build-plate-empty">
-                  No objects on plate.
-                  <br />
-                  Use the toolbar to add objects.
-                </div>
-              ) : (
-                <div className="build-plate-object-list">
-                  {plate.objects.map((obj) => (
-                    <div
-                      key={obj.id}
-                      className={`build-plate-object-item ${plate.selectedObjectId === obj.id ? 'build-plate-object-item--selected' : ''}`}
-                      onClick={() => handleObjectListClick(obj)}
-                    >
-                      <span className="build-plate-object-type-badge">
-                        {obj.type.toUpperCase()}
-                      </span>
-                      <span className="build-plate-object-name">{obj.name}</span>
-                      {obj.colorGroups && obj.colorGroups.length > 1 && (
-                        <span className="build-plate-object-colors">
-                          {obj.colorGroups.map((cg, i) => (
-                            <span
-                              key={i}
-                              className="build-plate-color-swatch"
-                              style={{ backgroundColor: cg.color.slice(0, 7) }}
-                              title={`Extruder ${i + 1}: ${cg.color}`}
-                            />
-                          ))}
-                        </span>
-                      )}
-                      {obj.printOverrides && (
-                        <span className="build-plate-object-override-badge" title="Has per-object settings">
-                          *
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )
-            )}
+            {/* Mode toggle */}
+            <div className="build-plate-sidebar-toggle">
+              <button
+                className={`build-plate-sidebar-toggle-btn ${sidebarMode === 'objects' ? 'build-plate-sidebar-toggle-btn--active' : ''}`}
+                onClick={() => setSidebarMode('objects')}
+              >
+                Objects ({plate.objects.length})
+              </button>
+              <button
+                className={`build-plate-sidebar-toggle-btn ${sidebarMode === 'plate-settings' ? 'build-plate-sidebar-toggle-btn--active' : ''}`}
+                onClick={() => setSidebarMode('plate-settings')}
+              >
+                Plate Settings
+              </button>
+            </div>
 
-            {/* Object Settings section (visible when an object is selected) */}
-            {plate.selectedObject && (
-              <>
-                <button
-                  className="build-plate-section-toggle"
-                  onClick={() => toggleSection('object-settings')}
-                  aria-expanded={!collapsedSections.has('object-settings')}
-                >
-                  <span className={`build-plate-section-arrow ${collapsedSections.has('object-settings') ? '' : 'build-plate-section-arrow--open'}`}>&#9654;</span>
-                  <span>Object: {plate.selectedObject.name}</span>
-                </button>
-                {!collapsedSections.has('object-settings') && (
+            {/* Objects mode */}
+            {sidebarMode === 'objects' && (
+              <div className="build-plate-sidebar-content">
+                {/* Object list */}
+                {plate.objects.length === 0 ? (
+                  <div className="build-plate-empty">
+                    No objects on plate.
+                    <br />
+                    Use the toolbar to add objects.
+                  </div>
+                ) : (
+                  <div className="build-plate-object-list">
+                    {plate.objects.map((obj) => (
+                      <div
+                        key={obj.id}
+                        className={`build-plate-object-item ${plate.selectedObjectId === obj.id ? 'build-plate-object-item--selected' : ''}`}
+                        onClick={() => handleObjectListClick(obj)}
+                      >
+                        <span className="build-plate-object-type-badge">
+                          {obj.type.toUpperCase()}
+                        </span>
+                        <span className="build-plate-object-name">{obj.name}</span>
+                        {obj.colorGroups && obj.colorGroups.length > 1 && (
+                          <span className="build-plate-object-colors">
+                            {obj.colorGroups.map((cg, i) => (
+                              <span
+                                key={i}
+                                className="build-plate-color-swatch"
+                                style={{ backgroundColor: cg.color.slice(0, 7) }}
+                                title={`Extruder ${i + 1}: ${cg.color}`}
+                              />
+                            ))}
+                          </span>
+                        )}
+                        {obj.printOverrides && Object.keys(obj.printOverrides).length > 0 && (
+                          <span className="build-plate-object-override-badge" title="Has per-object settings">
+                            *
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Object settings (visible when an object is selected) */}
+                {plate.selectedObject && (
                   <div className="build-plate-sidebar-section-body">
+                    <div className="build-plate-object-settings-header">
+                      <strong>{plate.selectedObject.name}</strong>
+                    </div>
+
                     {/* SCAD parameter editor + re-render */}
                     {plate.selectedObject.type === 'scad' &&
                       plate.selectedObject.scadParamDefs &&
@@ -915,83 +1025,135 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                       onResetField={handleResetField}
                       onUpdateTransform={plate.updateObjectTransform}
                       onSetExtruder={plate.setExtruderAssignment}
+                      onSetVolumeExtruder={plate.setVolumeExtruder}
                     />
                   </div>
                 )}
-              </>
+              </div>
             )}
 
-            {/* Plate Settings section */}
-            <button
-              className="build-plate-section-toggle"
-              onClick={() => toggleSection('plate-settings')}
-              aria-expanded={!collapsedSections.has('plate-settings')}
-            >
-              <span className={`build-plate-section-arrow ${collapsedSections.has('plate-settings') ? '' : 'build-plate-section-arrow--open'}`}>&#9654;</span>
-              <span>Plate Settings</span>
-            </button>
-            {!collapsedSections.has('plate-settings') && (
-              <div className="build-plate-sidebar-section-body">
+            {/* Plate Settings mode */}
+            {sidebarMode === 'plate-settings' && (
+              <div className="build-plate-sidebar-content">
                 <div className="build-plate-plate-settings">
-                  <div className="build-plate-transform-section">
-                    <h4>Print Sequence</h4>
-                    <select
-                      value={plate.printSequence}
-                      onChange={(e) =>
-                        plate.setPrintSequence(e.target.value as 'by_layer' | 'by_object')
-                      }
-                    >
-                      <option value="by_layer">By Layer</option>
-                      <option value="by_object">By Object</option>
-                    </select>
-                  </div>
-                  <BuildPlatePrimeTower
-                    config={plate.primeTower}
-                    onChange={plate.setPrimeTower}
-                    objects={plate.objects}
-                    bedWidth={bedWidth}
-                    bedDepth={bedDepth}
-                    flushVolumeConfig={plate.flushVolumeConfig}
-                    defaultFlushVolume={plate.plateProfile.flushVolume}
-                    layerHeight={plate.plateProfile.layerHeight}
-                    lineWidth={plate.plateProfile.lineWidth}
-                    extruderCount={extruderCount}
-                  />
-                  <BuildPlateFlushVolumes
-                    config={plate.flushVolumeConfig}
-                    onChange={plate.setFlushVolumeConfig}
-                    objects={plate.objects}
-                    defaultFlushVolume={plate.plateProfile.flushVolume}
-                  />
-                  <div className="build-plate-transform-section">
-                    <h4>Bed Info</h4>
-                    <p className="build-plate-override-hint">
-                      {bedWidth} &times; {bedDepth} mm, max height {maxHeight} mm
-                      {originCenter ? ', center origin' : ''}
-                    </p>
-                  </div>
-
-                  {/* Plate-level print settings tabs */}
                   <div className="build-plate-settings-tabs">
                     <div className="build-plate-settings-tab-bar">
-                      {(['quality', 'walls', 'infill', 'speed', 'support', 'adhesion', 'advanced'] as const).map((tab) => (
-                        <button
-                          key={tab}
-                          className={`build-plate-settings-tab ${plateSettingsTab === tab ? 'build-plate-settings-tab--active' : ''}`}
-                          onClick={() => setPlateSettingsTab(tab)}
-                        >
-                          {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                        </button>
-                      ))}
+                      {(['plate', 'prime tower', 'flush', 'quality', 'walls', 'infill', 'speed', 'support', 'adhesion', 'advanced'] as const).map((tab) => {
+                        // Check if any per-object overrides exist for fields in this tab
+                        const tabHasOverrides = tab !== 'plate' && tab !== 'prime tower' && tab !== 'flush' &&
+                          fieldsWithObjectOverrides.size > 0 &&
+                          hasTabOverrides(tab, fieldsWithObjectOverrides);
+                        return (
+                          <button
+                            key={tab}
+                            className={`build-plate-settings-tab ${plateSettingsTab === tab ? 'build-plate-settings-tab--active' : ''}`}
+                            onClick={() => setPlateSettingsTab(tab)}
+                          >
+                            {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                            {tabHasOverrides && (
+                              <span className="build-plate-override-warning" title="Some objects override settings in this tab">
+                                &#9888;
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                     <div className="build-plate-settings-tab-content">
-                      {plateSettingsTab === 'quality' && <QualityTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'walls' && <WallsTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'infill' && <InfillTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'speed' && <SpeedTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'support' && <SupportTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'adhesion' && <AdhesionTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
-                      {plateSettingsTab === 'advanced' && <AdvancedTab profile={plate.plateProfile} onChange={handlePlateProfileChange} />}
+                      {plateSettingsTab === 'plate' && (
+                        <div className="build-plate-tab-plate">
+                          <div className="build-plate-transform-section">
+                            <h4>Print Sequence</h4>
+                            <select
+                              value={plate.printSequence}
+                              onChange={(e) =>
+                                plate.setPrintSequence(e.target.value as 'by_layer' | 'by_object')
+                              }
+                            >
+                              <option value="by_layer">By Layer</option>
+                              <option value="by_object">By Object</option>
+                            </select>
+                          </div>
+                          <div className="build-plate-transform-section">
+                            <h4>Bed Info</h4>
+                            <p className="build-plate-override-hint">
+                              {bedWidth} &times; {bedDepth} mm, max height {maxHeight} mm
+                              {originCenter ? ', center origin' : ''}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                      {plateSettingsTab === 'prime tower' && (
+                        <BuildPlatePrimeTower
+                          config={plate.primeTower}
+                          onChange={plate.setPrimeTower}
+                          objects={plate.objects}
+                          bedWidth={bedWidth}
+                          bedDepth={bedDepth}
+                          flushVolumeConfig={plate.flushVolumeConfig}
+                          defaultFlushVolume={plate.plateProfile.flushVolume}
+                          layerHeight={plate.plateProfile.layerHeight}
+                          lineWidth={plate.plateProfile.lineWidth}
+                          extruderCount={extruderCount}
+                        />
+                      )}
+                      {plateSettingsTab === 'flush' && (
+                        <BuildPlateFlushVolumes
+                          config={plate.flushVolumeConfig}
+                          onChange={plate.setFlushVolumeConfig}
+                          objects={plate.objects}
+                          defaultFlushVolume={plate.plateProfile.flushVolume}
+                        />
+                      )}
+                      {plateSettingsTab === 'quality' && (
+                        <QualityTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'walls' && (
+                        <WallsTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'infill' && (
+                        <InfillTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'speed' && (
+                        <SpeedTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'support' && (
+                        <SupportTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'adhesion' && (
+                        <AdhesionTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
+                      {plateSettingsTab === 'advanced' && (
+                        <AdvancedTab
+                          profile={plate.plateProfile}
+                          onChange={handlePlateProfileChange}
+                          perObjectOverrides={fieldsWithObjectOverrides}
+                        />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1018,48 +1180,6 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                 >
                   {scadPickerLoading ? 'Loading...' : '+ SCAD'}
                 </button>
-              </div>
-              <div className="build-plate-toolbar-group">
-                <button
-                  className="build-plate-btn"
-                  onClick={handleDelete}
-                  disabled={!plate.selectedObjectId}
-                  title="Delete selected object"
-                >
-                  Delete
-                </button>
-                <button
-                  className="build-plate-btn"
-                  onClick={handleDuplicate}
-                  disabled={!plate.selectedObjectId}
-                  title="Duplicate selected object"
-                >
-                  Duplicate
-                </button>
-                <button
-                  className="build-plate-btn"
-                  onClick={handleLayFlat}
-                  disabled={!plate.selectedObjectId}
-                  title="Rotate object so largest flat face sits on the bed"
-                >
-                  Lay Flat
-                </button>
-                <button
-                  className="build-plate-btn"
-                  onClick={() => handleMirror('x')}
-                  disabled={!plate.selectedObjectId}
-                  title="Mirror along X axis"
-                >
-                  Mirror X
-                </button>
-                <button
-                  className="build-plate-btn"
-                  onClick={() => handleMirror('y')}
-                  disabled={!plate.selectedObjectId}
-                  title="Mirror along Y axis"
-                >
-                  Mirror Y
-                </button>
                 <button
                   className="build-plate-btn"
                   onClick={() => setShowArrayCopy((prev) => !prev)}
@@ -1071,8 +1191,6 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                 <button className="build-plate-btn" onClick={plate.autoArrange} title="Auto-arrange objects">
                   Arrange
                 </button>
-              </div>
-              <div className="build-plate-toolbar-group">
                 <button
                   className="build-plate-btn"
                   onClick={plate.undo}
@@ -1089,8 +1207,6 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                 >
                   Redo
                 </button>
-              </div>
-              <div className="build-plate-toolbar-group">
                 <button
                   className={`build-plate-btn ${gridSnap ? 'build-plate-btn--active' : ''}`}
                   onClick={handleToggleGridSnap}
@@ -1171,6 +1287,31 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
               </div>
             )}
 
+            {/* WASM performance warning */}
+            {showWasmWarning && (
+              <div className="build-plate-scad-picker-overlay" onClick={() => setShowWasmWarning(false)}>
+                <div className="build-plate-scad-picker" onClick={(e) => e.stopPropagation()}>
+                  <h3>Slicing Performance Warning</h3>
+                  <p style={{ margin: '0.5rem 0 1rem', lineHeight: 1.5, color: '#ccc' }}>
+                    WASM slicing in the browser is <strong>extremely slow</strong> compared to native slicing.
+                    For significantly better performance, consider using the Android app or a desktop slicer.
+                  </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                    <button className="build-plate-btn" onClick={() => setShowWasmWarning(false)}>Cancel</button>
+                    <button
+                      className="build-plate-btn build-plate-btn--primary"
+                      onClick={() => {
+                        setShowWasmWarning(false);
+                        void doSlicePlate();
+                      }}
+                    >
+                      Slice Anyway
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 3D Canvas */}
             <div
               className={`build-plate-canvas-container ${isDragOver ? 'build-plate-canvas-container--drag-over' : ''}`}
@@ -1238,8 +1379,30 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                 onSelectObject={handleSelectObject}
                 onUpdateTransform={plate.updateObjectTransform}
                 onUpdatePrimeTowerPosition={handlePrimeTowerPositionUpdate}
+                onObjectContextMenu={handleObjectContextMenu}
                 gridSnap={gridSnap}
               />
+              {/* Right-click context menu */}
+              {contextMenu && (
+                <div
+                  className="build-plate-context-menu-overlay"
+                  onClick={closeContextMenu}
+                  onContextMenu={(e) => { e.preventDefault(); closeContextMenu(); }}
+                >
+                  <div
+                    className="build-plate-context-menu"
+                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button onClick={() => { handleDuplicate(); closeContextMenu(); }}>Duplicate</button>
+                    <button onClick={() => { handleLayFlat(); closeContextMenu(); }}>Lay Flat</button>
+                    <button onClick={() => { handleMirror('x'); closeContextMenu(); }}>Mirror X</button>
+                    <button onClick={() => { handleMirror('y'); closeContextMenu(); }}>Mirror Y</button>
+                    <hr />
+                    <button onClick={() => { handleDelete(); closeContextMenu(); }} className="build-plate-context-menu-danger">Delete</button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -1280,6 +1443,7 @@ export function BuildPlateView({ printer, openscad, onClose, pendingObject, onPe
                           )
                         : ['#dddddd']
                     }
+                    sliceStats={sliceResult.stats}
                   />
                 </div>
               ) : (

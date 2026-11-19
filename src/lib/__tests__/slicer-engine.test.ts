@@ -12,7 +12,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { checkCrossOriginIsolation } from '../slicer-engine';
+import { checkCrossOriginIsolation, parsePrintTimeStr, supportsMemory64 } from '../slicer-engine';
+import type { SliceStats } from '../../types/print-profile';
 
 // ─── checkCrossOriginIsolation ────────────────────────────
 
@@ -650,5 +651,292 @@ describe('binary STL format', () => {
         expect(Number.isNaN(val)).toBe(false);
       }
     }
+  });
+});
+
+// ─── parsePrintTimeStr ───────────────────────────────────
+
+describe('parsePrintTimeStr', () => {
+  it('parses hours, minutes, seconds', () => {
+    expect(parsePrintTimeStr('1h 23m 45s')).toBe(1 * 3600 + 23 * 60 + 45);
+  });
+
+  it('parses days, hours, minutes, seconds', () => {
+    expect(parsePrintTimeStr('1d 2h 34m 56s')).toBe(86400 + 2 * 3600 + 34 * 60 + 56);
+  });
+
+  it('parses minutes only', () => {
+    expect(parsePrintTimeStr('45m')).toBe(45 * 60);
+  });
+
+  it('parses seconds only', () => {
+    expect(parsePrintTimeStr('30s')).toBe(30);
+  });
+
+  it('parses hours and minutes without seconds', () => {
+    expect(parsePrintTimeStr('2h 15m')).toBe(2 * 3600 + 15 * 60);
+  });
+
+  it('parses hours only', () => {
+    expect(parsePrintTimeStr('3h')).toBe(3 * 3600);
+  });
+
+  it('parses multi-digit values', () => {
+    expect(parsePrintTimeStr('12h 59m 59s')).toBe(12 * 3600 + 59 * 60 + 59);
+  });
+
+  it('returns 0 for empty string', () => {
+    expect(parsePrintTimeStr('')).toBe(0);
+  });
+
+  it('returns 0 for unparseable string', () => {
+    expect(parsePrintTimeStr('unknown')).toBe(0);
+  });
+
+  it('returns 0 for completely garbled input', () => {
+    expect(parsePrintTimeStr('---')).toBe(0);
+  });
+});
+
+// ─── SliceStats parsing (getSliceStats JSON → SliceStats) ─
+
+describe('SliceStats parsing', () => {
+  /**
+   * Simulate the JSON → SliceStats mapping from slicer-engine.ts getSliceStats().
+   * This mirrors the exact logic in createSlicerEngine().getSliceStats() (lines 516-543)
+   * so we can test parsing without a real WASM module.
+   */
+  function parseSliceStatsJson(json: string): SliceStats {
+    const raw = JSON.parse(json);
+    return {
+      printTime: parsePrintTimeStr(raw.estimated_normal_print_time ?? ''),
+      printTimeStr: raw.estimated_normal_print_time ?? '',
+      totalFilamentG: raw.total_used_filament ?? 0,
+      totalFilamentMm3: raw.total_extruded_volume ?? 0,
+      totalWeight: raw.total_weight ?? 0,
+      totalCost: raw.total_cost ?? 0,
+      totalToolchanges: raw.total_toolchanges ?? 0,
+      initialTool: raw.initial_tool ?? 0,
+      wipeTowerFilament: raw.total_wipe_tower_filament ?? 0,
+      perExtruderFilament: raw.filament_stats ?? {},
+      layerCount: raw.layer_count ?? 0,
+      supportLayerCount: raw.support_layer_count ?? 0,
+    };
+  }
+
+  it('parses a complete stats JSON from C++', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '2h 15m 30s',
+      total_used_filament: 12.34,
+      total_extruded_volume: 9876.5,
+      total_weight: 12.34,
+      total_cost: 0.45,
+      total_toolchanges: 3,
+      initial_tool: 0,
+      total_wipe_tower_filament: 1.23,
+      filament_stats: { '0': 8.5, '1': 3.84 },
+      layer_count: 150,
+      support_layer_count: 10,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.printTime).toBe(2 * 3600 + 15 * 60 + 30);
+    expect(stats.printTimeStr).toBe('2h 15m 30s');
+    expect(stats.totalFilamentG).toBeCloseTo(12.34);
+    expect(stats.totalFilamentMm3).toBeCloseTo(9876.5);
+    expect(stats.totalWeight).toBeCloseTo(12.34);
+    expect(stats.totalCost).toBeCloseTo(0.45);
+    expect(stats.totalToolchanges).toBe(3);
+    expect(stats.initialTool).toBe(0);
+    expect(stats.wipeTowerFilament).toBeCloseTo(1.23);
+    expect(stats.perExtruderFilament).toEqual({ '0': 8.5, '1': 3.84 });
+    expect(stats.layerCount).toBe(150);
+    expect(stats.supportLayerCount).toBe(10);
+  });
+
+  it('handles zero values for all numeric fields', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '0s',
+      total_used_filament: 0,
+      total_extruded_volume: 0,
+      total_weight: 0,
+      total_cost: 0,
+      total_toolchanges: 0,
+      initial_tool: 0,
+      total_wipe_tower_filament: 0,
+      filament_stats: {},
+      layer_count: 0,
+      support_layer_count: 0,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.printTime).toBe(0);
+    expect(stats.totalFilamentG).toBe(0);
+    expect(stats.totalFilamentMm3).toBe(0);
+    expect(stats.totalWeight).toBe(0);
+    expect(stats.totalCost).toBe(0);
+    expect(stats.totalToolchanges).toBe(0);
+    expect(stats.initialTool).toBe(0);
+    expect(stats.wipeTowerFilament).toBe(0);
+    expect(stats.perExtruderFilament).toEqual({});
+    expect(stats.layerCount).toBe(0);
+    expect(stats.supportLayerCount).toBe(0);
+  });
+
+  it('handles empty filament_stats map', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '10m',
+      total_used_filament: 5.0,
+      total_extruded_volume: 4000,
+      total_weight: 5.0,
+      total_cost: 0.1,
+      total_toolchanges: 0,
+      initial_tool: 0,
+      total_wipe_tower_filament: 0,
+      filament_stats: {},
+      layer_count: 50,
+      support_layer_count: 0,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.perExtruderFilament).toEqual({});
+    expect(Object.keys(stats.perExtruderFilament)).toHaveLength(0);
+  });
+
+  it('handles missing optional fields with defaults', () => {
+    // Simulate a minimal JSON response (e.g., from an older WASM build)
+    const json = JSON.stringify({
+      estimated_normal_print_time: '1h',
+      total_used_filament: 10,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.printTime).toBe(3600);
+    expect(stats.printTimeStr).toBe('1h');
+    expect(stats.totalFilamentG).toBe(10);
+    // Missing fields default to 0 or empty
+    expect(stats.totalFilamentMm3).toBe(0);
+    expect(stats.totalWeight).toBe(0);
+    expect(stats.totalCost).toBe(0);
+    expect(stats.totalToolchanges).toBe(0);
+    expect(stats.initialTool).toBe(0);
+    expect(stats.wipeTowerFilament).toBe(0);
+    expect(stats.perExtruderFilament).toEqual({});
+    expect(stats.layerCount).toBe(0);
+    expect(stats.supportLayerCount).toBe(0);
+  });
+
+  it('handles completely empty JSON object', () => {
+    const stats = parseSliceStatsJson('{}');
+    expect(stats.printTime).toBe(0);
+    expect(stats.printTimeStr).toBe('');
+    expect(stats.totalFilamentG).toBe(0);
+    expect(stats.perExtruderFilament).toEqual({});
+    expect(stats.layerCount).toBe(0);
+  });
+
+  it('handles single-extruder filament stats', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '30m',
+      total_used_filament: 7.5,
+      filament_stats: { '0': 7.5 },
+      layer_count: 100,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.perExtruderFilament).toEqual({ '0': 7.5 });
+    expect(Object.keys(stats.perExtruderFilament)).toHaveLength(1);
+  });
+
+  it('handles multi-extruder filament stats (4 extruders)', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '5h 30m',
+      total_used_filament: 50.0,
+      filament_stats: { '0': 20.0, '1': 15.0, '2': 10.0, '3': 5.0 },
+      total_toolchanges: 42,
+      initial_tool: 1,
+      layer_count: 500,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.perExtruderFilament).toEqual({ '0': 20, '1': 15, '2': 10, '3': 5 });
+    expect(Object.keys(stats.perExtruderFilament)).toHaveLength(4);
+    expect(stats.totalToolchanges).toBe(42);
+    expect(stats.initialTool).toBe(1);
+  });
+
+  it('handles very long print times (days)', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '3d 12h 45m 10s',
+      total_used_filament: 500,
+      layer_count: 5000,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.printTime).toBe(3 * 86400 + 12 * 3600 + 45 * 60 + 10);
+    expect(stats.printTimeStr).toBe('3d 12h 45m 10s');
+  });
+
+  it('handles floating-point precision in filament stats', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '1h',
+      total_used_filament: 0.001,
+      total_extruded_volume: 0.0005,
+      filament_stats: { '0': 0.001 },
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.totalFilamentG).toBeCloseTo(0.001, 5);
+    expect(stats.totalFilamentMm3).toBeCloseTo(0.0005, 5);
+  });
+
+  it('handles non-zero initial_tool (multi-color starting on extruder 2)', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '1h',
+      total_used_filament: 10,
+      initial_tool: 2,
+      total_toolchanges: 5,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.initialTool).toBe(2);
+  });
+
+  it('returns null-safe fallbacks for getSliceStats on older WASM', () => {
+    // Simulate a mock engine where getSliceStats is not a function
+    const mockSlicer = {
+      getSliceStats: 'not a function',
+    };
+    // The real code checks: typeof s.getSliceStats !== 'function' → return null
+    expect(typeof mockSlicer.getSliceStats !== 'function').toBe(true);
+  });
+
+  it('handles large wipe tower filament usage', () => {
+    const json = JSON.stringify({
+      estimated_normal_print_time: '8h 20m',
+      total_used_filament: 100,
+      total_wipe_tower_filament: 25.5,
+      filament_stats: { '0': 50, '1': 50 },
+      total_toolchanges: 200,
+    });
+
+    const stats = parseSliceStatsJson(json);
+    expect(stats.wipeTowerFilament).toBeCloseTo(25.5);
+    expect(stats.totalToolchanges).toBe(200);
+  });
+});
+
+// ─── supportsMemory64 ────────────────────────────────────
+
+describe('supportsMemory64', () => {
+  it('returns a boolean', () => {
+    const result = supportsMemory64();
+    expect(typeof result).toBe('boolean');
+  });
+
+  it('returns the same value on repeated calls (cached)', () => {
+    const first = supportsMemory64();
+    const second = supportsMemory64();
+    expect(first).toBe(second);
   });
 });

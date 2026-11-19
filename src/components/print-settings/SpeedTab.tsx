@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
+import type { PrintProfile } from '../../types/print-profile';
 import type { PrintSettingsTabProps } from './QualityTab';
 import { createOverrideHelpers } from './override-helpers';
 
@@ -6,9 +7,70 @@ export interface SpeedTabProps extends PrintSettingsTabProps {
   maxVelocity?: number;
 }
 
-export function SpeedTab({ profile, onChange, overrides, onResetField, maxVelocity }: SpeedTabProps) {
+/** Maps PrintProfile overhang speed field names to OrcaSlicer config key names */
+const OVERHANG_SPEED_CONFIG_KEYS: Record<string, string> = {
+  overhang1_4Speed: 'overhang_1_4_speed',
+  overhang2_4Speed: 'overhang_2_4_speed',
+  overhang3_4Speed: 'overhang_3_4_speed',
+  overhang4_4Speed: 'overhang_4_4_speed',
+  scarfJointSpeed: 'scarf_joint_speed',
+};
+
+interface AutoSpeedFieldProps {
+  label: string;
+  value: number;
+  fieldKey: keyof PrintProfile;
+  fallbackValue: number;
+  max: number;
+  onChange: (updates: Partial<PrintProfile>) => void;
+  overrideClass?: string;
+  resetBtnEl?: React.ReactElement | null;
+  resolvedValue?: number;
+}
+
+function AutoSpeedField({ label, value, fieldKey, fallbackValue, max, onChange, overrideClass, resetBtnEl, resolvedValue }: AutoSpeedFieldProps) {
+  const isAuto = value === 0;
+  const hasResolved = resolvedValue !== undefined && resolvedValue > 0;
+  return (
+    <label className={`print-dialog-field${overrideClass || ''}`}>
+      <span>{label}{resetBtnEl}</span>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <input type="number"
+          value={isAuto ? (hasResolved ? resolvedValue : '') : value}
+          placeholder={isAuto && !hasResolved ? 'auto' : undefined}
+          min={0} max={max} step={1}
+          disabled={isAuto}
+          style={{ flex: 1, opacity: isAuto ? 0.5 : 1, fontStyle: isAuto ? 'italic' : undefined }}
+          onChange={(e) => onChange({ [fieldKey]: Number(e.target.value) } as Partial<PrintProfile>)} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={isAuto}
+            onChange={(e) => onChange({ [fieldKey]: e.target.checked ? 0 : (hasResolved ? resolvedValue : fallbackValue) } as Partial<PrintProfile>)} />
+          Auto
+          {isAuto && hasResolved && (
+            <span style={{ fontSize: '0.8em', opacity: 0.6, marginLeft: '0.15rem' }}>
+              (resolved)
+            </span>
+          )}
+        </label>
+      </div>
+    </label>
+  );
+}
+
+export function SpeedTab({ profile, onChange, overrides, onResetField, maxVelocity, resolvedConfigs }: SpeedTabProps) {
   const max = maxVelocity ?? 500;
   const { oc, resetBtn } = createOverrideHelpers(overrides, onResetField);
+
+  /** Get the resolved value for an auto speed field from post-slice data */
+  const getResolvedSpeed = (fieldKey: string): number | undefined => {
+    const configKey = OVERHANG_SPEED_CONFIG_KEYS[fieldKey];
+    if (configKey && resolvedConfigs?.[configKey]) {
+      const v = parseFloat(resolvedConfigs[configKey]);
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return undefined;
+  };
+
   return (
     <>
       {/* Per-feature Speeds */}
@@ -103,62 +165,10 @@ export function SpeedTab({ profile, onChange, overrides, onResetField, maxVeloci
       </label>
       {profile.enableOverhangSpeed && (
         <>
-          <label className={`print-dialog-field${oc('overhang1_4Speed')}`}>
-            <span>25% Overhang (mm/s){resetBtn('overhang1_4Speed')}</span>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input type="number" value={profile.overhang1_4Speed} min={0} max={max} step={1}
-                disabled={profile.overhang1_4Speed === 0}
-                style={{ flex: 1, opacity: profile.overhang1_4Speed === 0 ? 0.5 : 1 }}
-                onChange={(e) => onChange({ overhang1_4Speed: Number(e.target.value) })} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={profile.overhang1_4Speed === 0}
-                  onChange={(e) => onChange({ overhang1_4Speed: e.target.checked ? 0 : 50 })} />
-                Auto
-              </label>
-            </div>
-          </label>
-          <label className={`print-dialog-field${oc('overhang2_4Speed')}`}>
-            <span>50% Overhang (mm/s){resetBtn('overhang2_4Speed')}</span>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input type="number" value={profile.overhang2_4Speed} min={0} max={max} step={1}
-                disabled={profile.overhang2_4Speed === 0}
-                style={{ flex: 1, opacity: profile.overhang2_4Speed === 0 ? 0.5 : 1 }}
-                onChange={(e) => onChange({ overhang2_4Speed: Number(e.target.value) })} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={profile.overhang2_4Speed === 0}
-                  onChange={(e) => onChange({ overhang2_4Speed: e.target.checked ? 0 : 40 })} />
-                Auto
-              </label>
-            </div>
-          </label>
-          <label className={`print-dialog-field${oc('overhang3_4Speed')}`}>
-            <span>75% Overhang (mm/s){resetBtn('overhang3_4Speed')}</span>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input type="number" value={profile.overhang3_4Speed} min={0} max={max} step={1}
-                disabled={profile.overhang3_4Speed === 0}
-                style={{ flex: 1, opacity: profile.overhang3_4Speed === 0 ? 0.5 : 1 }}
-                onChange={(e) => onChange({ overhang3_4Speed: Number(e.target.value) })} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={profile.overhang3_4Speed === 0}
-                  onChange={(e) => onChange({ overhang3_4Speed: e.target.checked ? 0 : 30 })} />
-                Auto
-              </label>
-            </div>
-          </label>
-          <label className={`print-dialog-field${oc('overhang4_4Speed')}`}>
-            <span>100% Overhang (mm/s){resetBtn('overhang4_4Speed')}</span>
-            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input type="number" value={profile.overhang4_4Speed} min={0} max={max} step={1}
-                disabled={profile.overhang4_4Speed === 0}
-                style={{ flex: 1, opacity: profile.overhang4_4Speed === 0 ? 0.5 : 1 }}
-                onChange={(e) => onChange({ overhang4_4Speed: Number(e.target.value) })} />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85em', whiteSpace: 'nowrap' }}>
-                <input type="checkbox" checked={profile.overhang4_4Speed === 0}
-                  onChange={(e) => onChange({ overhang4_4Speed: e.target.checked ? 0 : 20 })} />
-                Auto
-              </label>
-            </div>
-          </label>
+          <AutoSpeedField label="25% Overhang (mm/s)" value={profile.overhang1_4Speed} fieldKey="overhang1_4Speed" fallbackValue={50} max={max} onChange={onChange} overrideClass={oc('overhang1_4Speed')} resetBtnEl={resetBtn('overhang1_4Speed')} resolvedValue={getResolvedSpeed('overhang1_4Speed')} />
+          <AutoSpeedField label="50% Overhang (mm/s)" value={profile.overhang2_4Speed} fieldKey="overhang2_4Speed" fallbackValue={40} max={max} onChange={onChange} overrideClass={oc('overhang2_4Speed')} resetBtnEl={resetBtn('overhang2_4Speed')} resolvedValue={getResolvedSpeed('overhang2_4Speed')} />
+          <AutoSpeedField label="75% Overhang (mm/s)" value={profile.overhang3_4Speed} fieldKey="overhang3_4Speed" fallbackValue={30} max={max} onChange={onChange} overrideClass={oc('overhang3_4Speed')} resetBtnEl={resetBtn('overhang3_4Speed')} resolvedValue={getResolvedSpeed('overhang3_4Speed')} />
+          <AutoSpeedField label="100% Overhang (mm/s)" value={profile.overhang4_4Speed} fieldKey="overhang4_4Speed" fallbackValue={20} max={max} onChange={onChange} overrideClass={oc('overhang4_4Speed')} resetBtnEl={resetBtn('overhang4_4Speed')} resolvedValue={getResolvedSpeed('overhang4_4Speed')} />
         </>
       )}
 

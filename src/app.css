@@ -2022,6 +2022,31 @@ input:focus, select:focus {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+/* ─── GCode Stats Overlay ──────────────────────── */
+.gcode-stats-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  pointer-events: none;
+  z-index: 10;
+  backdrop-filter: blur(4px);
+}
+
+.gcode-stats-item {
+  white-space: nowrap;
+}
+
+.gcode-stats-secondary {
+  opacity: 0.6;
+  font-size: 0.75rem;
+}
+
 /* ─── Inline GCode Preview in Done Phase ──────── */
 .print-dialog-inline-preview {
   position: relative;
@@ -2096,12 +2121,53 @@ input:focus, select:focus {
   color: #155724;
 }
 
+.print-dialog-engine-badge--wasm64 {
+  background: #e8d5f5;
+  color: #4a148c;
+}
+
 .print-dialog-done-info {
   display: flex;
   gap: 1rem;
   font-size: 0.85rem;
   color: rgba(255, 255, 255, 0.7);
   margin-bottom: 0.5rem;
+}
+
+.print-dialog-stats-panel {
+  margin-bottom: 0.75rem;
+}
+
+.print-dialog-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.print-dialog-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4rem 0.6rem;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.print-dialog-stat-label {
+  font-size: 0.7rem;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.print-dialog-stat-value {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.print-dialog-stat-secondary {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* ─── Build Plate View ─────────────────────────────── */
@@ -2193,40 +2259,67 @@ input:focus, select:focus {
   overflow-y: auto;
 }
 
-/* ─── Collapsible section toggle ────────────────── */
-.build-plate-section-toggle {
+/* ─── Sidebar mode toggle ────────────────────────── */
+.build-plate-sidebar-toggle {
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.85rem;
+  border-bottom: 1px solid #ddd;
+  flex-shrink: 0;
+}
+
+.build-plate-sidebar-toggle-btn {
+  flex: 1;
+  padding: 0.5rem 0.5rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  color: #555;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: #777;
+  text-align: center;
   border: none;
-  border-bottom: 1px solid #eee;
+  border-bottom: 2px solid transparent;
   background: #fafafa;
   cursor: pointer;
-  text-align: left;
-  min-height: 36px;
-  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 
-.build-plate-section-toggle:hover {
+.build-plate-sidebar-toggle-btn:hover {
   background: #f0f0f0;
+  color: #555;
 }
 
-.build-plate-section-arrow {
-  font-size: 0.6rem;
-  transition: transform 0.15s ease;
-  display: inline-block;
-  flex-shrink: 0;
+.build-plate-sidebar-toggle-btn--active {
+  color: #4a90d9;
+  border-bottom-color: #4a90d9;
+  background: #fff;
 }
 
-.build-plate-section-arrow--open {
-  transform: rotate(90deg);
+.build-plate-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Object settings header ─────────────────────── */
+.build-plate-object-settings-header {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #eee;
+  background: #f5f5ff;
+}
+
+/* ─── Per-object override warning icons ──────────── */
+.build-plate-override-warning {
+  color: #e6a817;
+  font-size: 0.75rem;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}
+
+.build-plate-field-override-warning {
+  color: #e6a817;
+  font-size: 0.8rem;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+  cursor: help;
 }
 
 .build-plate-sidebar-section-body {
@@ -3083,4 +3176,52 @@ input:focus, select:focus {
   margin-top: 6px;
   color: #f44;
   font-size: 12px;
+}
+
+/* Context menu (right-click on object) */
+.build-plate-context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+}
+
+.build-plate-context-menu {
+  position: fixed;
+  background: #2a2a3e;
+  border: 1px solid #555;
+  border-radius: 6px;
+  padding: 4px 0;
+  min-width: 140px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 31;
+}
+
+.build-plate-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: #ddd;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.build-plate-context-menu button:hover {
+  background: #3a3a5e;
+}
+
+.build-plate-context-menu hr {
+  border: none;
+  border-top: 1px solid #444;
+  margin: 4px 0;
+}
+
+.build-plate-context-menu-danger {
+  color: #f66 !important;
+}
+
+.build-plate-context-menu-danger:hover {
+  background: #4a2a2a !important;
 }

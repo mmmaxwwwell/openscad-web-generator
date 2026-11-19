@@ -71,8 +71,11 @@ vi.mock('../../hooks/useSlicer', () => ({
     engineName: 'WASM',
     slice: vi.fn(),
     slicePlate: vi.fn(),
+    queryResolvedConfigs: vi.fn().mockResolvedValue({}),
     cancel: vi.fn(),
     reset: vi.fn(),
+    sliceStats: null,
+    resolvedConfigs: null,
   }),
 }));
 
@@ -179,6 +182,7 @@ function createMockPlate(overrides: Partial<UseBuildPlateResult> = {}): UseBuild
     updateObjectOverrides: vi.fn(),
     clearObjectOverrides: vi.fn(),
     setExtruderAssignment: vi.fn(),
+    setVolumeExtruder: vi.fn(),
     replaceObjectMesh: vi.fn(),
 
     mirrorObject: vi.fn(),
@@ -1193,6 +1197,11 @@ describe('BuildPlateView', () => {
         fireEvent.click(screen.getByText('Slice Plate'));
       });
 
+      // WASM engine shows a performance warning — click through it
+      await act(async () => {
+        fireEvent.click(screen.getByText('Slice Anyway'));
+      });
+
       expect(mockSlicePlate).toHaveBeenCalled();
 
       // Restore default slicer mock
@@ -1326,10 +1335,11 @@ describe('BuildPlateView', () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Settings'));
+        fireEvent.click(screen.getByText('Plate Settings'));
       });
 
-      expect(screen.getByText('Plate Settings')).toBeTruthy();
+      // Default tab is "Plate" which shows Print Sequence and Bed Info
+      expect(screen.getByText('Print Sequence')).toBeTruthy();
     });
 
     it('shows bed info in plate settings', async () => {
@@ -1340,31 +1350,33 @@ describe('BuildPlateView', () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Settings'));
+        fireEvent.click(screen.getByText('Plate Settings'));
       });
 
       // Bed dimensions from mock: 220x220, max 250
       expect(screen.getByText(/220 × 220 mm/)).toBeTruthy();
     });
 
-    it('toggles plate settings panel closed when Settings button clicked again', async () => {
+    it('switches back to objects view when Objects toggle is clicked', async () => {
       mockPlate = createMockPlate();
 
       await act(async () => {
         render(<BuildPlateView printer={testPrinter} onClose={vi.fn()} />);
       });
 
-      // Open
+      // Switch to plate settings
       await act(async () => {
-        fireEvent.click(screen.getByText('Settings'));
+        fireEvent.click(screen.getByText('Plate Settings'));
       });
-      expect(screen.getByText('Plate Settings')).toBeTruthy();
+      expect(screen.getByText('Print Sequence')).toBeTruthy();
 
-      // Close
+      // Switch back to objects
       await act(async () => {
-        fireEvent.click(screen.getByText('Settings'));
+        // The toggle shows "Objects (N)" — find the button containing "Objects"
+        const objectsBtn = screen.getByText(/^Objects/);
+        fireEvent.click(objectsBtn);
       });
-      expect(screen.queryByText('Plate Settings')).toBeNull();
+      expect(screen.queryByText('Print Sequence')).toBeNull();
     });
 
     it('shows print sequence selector in plate settings', async () => {
@@ -1375,7 +1387,7 @@ describe('BuildPlateView', () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByText('Settings'));
+        fireEvent.click(screen.getByText('Plate Settings'));
       });
 
       expect(screen.getByText('Print Sequence')).toBeTruthy();
@@ -1385,79 +1397,7 @@ describe('BuildPlateView', () => {
   // ── Toolbar actions ───────────────────────────────────────────────────
 
   describe('toolbar actions', () => {
-    it('Delete button is disabled when nothing selected', async () => {
-      mockPlate = createMockPlate({
-        objects: [{ id: 'obj-1', name: 'A', type: 'stl', meshData: makeSTLBuffer(16), meshFormat: 'stl' as const, position: { x: 100, y: 100 }, rotation: 0, scale: { x: 1, y: 1, z: 1 }, copies: 1 }],
-        selectedObjectId: null,
-      });
-
-      await act(async () => {
-        render(<BuildPlateView printer={testPrinter} onClose={vi.fn()} />);
-      });
-
-      const deleteBtn = screen.getByText('Delete');
-      expect((deleteBtn as HTMLButtonElement).disabled).toBe(true);
-    });
-
-    it('Delete button calls removeObject when object selected', async () => {
-      const obj: BuildPlateObject = {
-        id: 'obj-del',
-        name: 'to_delete',
-        type: 'stl',
-        meshData: makeSTLBuffer(16),
-        meshFormat: 'stl',
-        position: { x: 100, y: 100 },
-        rotation: 0,
-        scale: { x: 1, y: 1, z: 1 },
-        copies: 1,
-      };
-
-      mockPlate = createMockPlate({
-        objects: [obj],
-        selectedObjectId: 'obj-del',
-        selectedObject: obj,
-      });
-
-      await act(async () => {
-        render(<BuildPlateView printer={testPrinter} onClose={vi.fn()} />);
-      });
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('Delete'));
-      });
-
-      expect(mockPlate.removeObject).toHaveBeenCalledWith('obj-del');
-    });
-
-    it('Duplicate button calls duplicateObject', async () => {
-      const obj: BuildPlateObject = {
-        id: 'obj-dup',
-        name: 'to_dup',
-        type: 'stl',
-        meshData: makeSTLBuffer(16),
-        meshFormat: 'stl',
-        position: { x: 100, y: 100 },
-        rotation: 0,
-        scale: { x: 1, y: 1, z: 1 },
-        copies: 1,
-      };
-
-      mockPlate = createMockPlate({
-        objects: [obj],
-        selectedObjectId: 'obj-dup',
-        selectedObject: obj,
-      });
-
-      await act(async () => {
-        render(<BuildPlateView printer={testPrinter} onClose={vi.fn()} />);
-      });
-
-      await act(async () => {
-        fireEvent.click(screen.getByText('Duplicate'));
-      });
-
-      expect(mockPlate.duplicateObject).toHaveBeenCalledWith('obj-dup');
-    });
+    // Delete, Duplicate, Lay Flat, Mirror X/Y are now in right-click context menu
 
     it('Arrange button calls autoArrange', async () => {
       mockPlate = createMockPlate();

@@ -86,13 +86,19 @@ export interface BuildPlateObject {
   printOverrides?: Partial<PrintProfile>;
 
   /**
-   * Extruder assignment for multicolor objects.
-   * Index into the printer's extruder list (0-based).
+   * Extruder assignment for single-color objects (0-based extruder index).
    * For single-extruder printers, always 0.
-   * For multicolor 3MF objects, each volume has its own extruder
-   * (stored in the 3MF metadata, not here).
+   * For multicolor objects, use volumeExtruders instead.
    */
   extruderAssignment?: number;
+
+  /**
+   * Per-volume extruder assignments for multicolor 3MF objects.
+   * Maps volume/color-group index (0-based) → extruder index (0-based).
+   * When undefined, defaults to identity mapping (volume i → extruder i).
+   * This controls which physical extruder prints each color volume.
+   */
+  volumeExtruders?: Record<number, number>;
 
   /**
    * Number of copies of this object to place.
@@ -224,6 +230,13 @@ export interface PlateSliceJobObject {
    * Only contains keys that differ from the global config.
    */
   config?: Record<string, string>;
+
+  /**
+   * Per-volume extruder assignments for multicolor 3MF objects.
+   * Maps volume index (0-based) → extruder (1-based, OrcaSlicer convention).
+   * When set, overrides the default sequential assignment.
+   */
+  volumeExtruders?: Record<number, number>;
 }
 
 /** Complete slice job for the slicer worker */
