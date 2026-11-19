@@ -13,6 +13,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <vector>
+#include <map>
 #include <cstdlib>
 #include <typeinfo>
 
@@ -51,6 +52,7 @@ extern "C" {
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/3mf.hpp"
+#include "libslic3r/TriangleMeshSlicer.hpp"
 
 namespace {
 
@@ -409,6 +411,90 @@ public:
         }
     }
 
+    // Print a volume in a layer cycle of extruders: a colour mixed from
+    // several filaments, one layer each (Snapmaker's "Cycle Mix"). The volume
+    // is cut at every layer edge it spans and its slabs are gathered into one
+    // volume per extruder, which replace it at the end of the object's list
+    // (so callers splitting several volumes go from the highest index down).
+    //
+    // Layers are counted as libslic3r lays them for this object: from its own
+    // lowest point, the first `firstLayerHeight` thick, then `layerHeight`
+    // each, each sliced at its mid-height. A layer is the volume's when that
+    // mid-height falls inside it; the cycle starts on the volume's first one.
+    // A process with variable layer heights or a raft breaks the grid; the
+    // caller must refuse those. `cycle` is 1-based extruders, comma separated.
+    // Returns how many volumes replaced it (0: it spans no layer, left as is).
+    int splitVolumeByLayers(int objectIndex, int volumeIndex, double firstLayerHeight,
+                            double layerHeight, const std::string& cycle) {
+        if (objectIndex < 0 || objectIndex >= static_cast<int>(m_model.objects.size())) {
+            throw std::runtime_error("Object index out of range: " + std::to_string(objectIndex));
+        }
+        auto* obj = m_model.objects[objectIndex];
+        if (volumeIndex < 0 || volumeIndex >= static_cast<int>(obj->volumes.size())) {
+            throw std::runtime_error("Volume index out of range: " + std::to_string(volumeIndex));
+        }
+        if (!(firstLayerHeight > 0) || !(layerHeight > 0)) {
+            throw std::runtime_error("Layer heights must be positive");
+        }
+        std::vector<int> extruders;
+        {
+            std::stringstream ss(cycle);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                int e = std::atoi(tok.c_str());
+                if (e < 1) throw std::runtime_error("Bad extruder in cycle: '" + cycle + "'");
+                extruders.push_back(e);
+            }
+        }
+        if (extruders.empty()) throw std::runtime_error("Empty extruder cycle");
+        if (obj->instances.empty()) throw std::runtime_error("Object has no instance");
+
+        auto* vol = obj->volumes[volumeIndex];
+        const Slic3r::Transform3d to_bed = obj->instances[0]->get_matrix() * vol->get_matrix();
+        const double base = obj->instance_bounding_box(0).min.z();
+        Slic3r::TriangleMesh on_bed = vol->mesh();
+        on_bed.transform(to_bed);
+        const double lo = on_bed.bounding_box().min.z() - base;
+        const double hi = on_bed.bounding_box().max.z() - base;
+
+        auto top = [&](int k) { return firstLayerHeight + k * layerHeight; };
+        auto mid = [&](int k) { return k == 0 ? firstLayerHeight / 2 : firstLayerHeight + (k - 0.5) * layerHeight; };
+        int first = 0;
+        while (mid(first) <= lo) ++first;
+        int last = first;
+        while (mid(last + 1) < hi) ++last;
+        if (mid(first) >= hi) return 0;
+
+        // Cut from the top down: each cut's upper part is one layer's slab.
+        std::map<int, indexed_triangle_set> slabs;
+        indexed_triangle_set rest = on_bed.its;
+        for (int k = last; k > first; --k) {
+            indexed_triangle_set upper, lower;
+            Slic3r::cut_mesh(rest, static_cast<float>(base + top(k - 1)), &upper, &lower, true);
+            Slic3r::its_merge(slabs[extruders[(k - first) % extruders.size()]], upper);
+            rest = std::move(lower);
+        }
+        Slic3r::its_merge(slabs[extruders[0]], rest);
+
+        const Slic3r::Transform3d back = to_bed.inverse();
+        int added = 0;
+        for (auto& [extruder, its] : slabs) {
+            if (its.indices.empty()) continue;
+            Slic3r::TriangleMesh mesh(std::move(its));
+            mesh.transform(back);
+            // Copies the volume's name, config and placement; only the mesh is new.
+            auto* part = obj->add_volume(*vol, std::move(mesh));
+            part->config.set("extruder", extruder);
+            ++added;
+        }
+        obj->delete_volume(volumeIndex);
+        obj->invalidate_bounding_box();
+        EM_ASM({ console.log('[slicer-wasm] Split object', $0, 'volume', $1, 'into', $2,
+                             'volumes over layers', $3, '-', $4); },
+               objectIndex, volumeIndex, added, first, last);
+        return added;
+    }
+
     // Set the print sequence mode: "by layer" or "by object".
     void setPrintSequence(const std::string& mode) {
         if (mode != "by layer" && mode != "by object") {
@@ -723,6 +809,7 @@ EMSCRIPTEN_BINDINGS(slicer_module) {
         .function("add3MFObject", &WasmSlicer::add3MFObject)
         .function("setObjectConfig", &WasmSlicer::setObjectConfig)
         .function("setVolumeExtruder", &WasmSlicer::setVolumeExtruder)
+        .function("splitVolumeByLayers", &WasmSlicer::splitVolumeByLayers)
         .function("setPrintSequence", &WasmSlicer::setPrintSequence)
         .function("getObjectCount", &WasmSlicer::getObjectCount)
         ;
